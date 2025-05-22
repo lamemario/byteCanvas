@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>NUS Secure Access Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img src="icons/icon48.png" alt="ByteCanvas Logo">
+      <h1>NUS Secure Access Tracker</h1>
+    </div>
+
+    <div class="scan-section">
+      <button id="scanButton" class="scan-button">
+        <span class="material-icons">security</span>
+        Scan This Page
+      </button>
+      <div id="scanStatus" class="scan-status"></div>
+    </div>
+
+    <div class="results-section">
+      <h2 style="display: flex; align-items: center; gap: 8px;">
+        <span class="material-icons">link</span>
+        Scan Results
+      </h2>
+      <span id="linkCount" class="link-count">0 links</span>
+      <div id="results" class="results">
+        <div class="empty-state">
+          <span class="material-icons">search</span>
+          <p>No scan performed yet</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-section">
+      <h2 style="display: flex; align-items: center; gap: 8px;">
+        <span class="material-icons">report</span>
+        Report Suspicious Link
+      </h2>
+      <form class="report-form" onsubmit="return false;">
+        <input type="text" id="reportLink" class="report-input" placeholder="Enter suspicious URL">
+        <button id="reportButton" class="report-button" type="button">
+          <span class="material-icons">send</span>
+        </button>
+      </form>
+    </div>
+
+    <div class="tips-section">
+      <h2 style="display: flex; align-items: center; gap: 8px;">
+        <span class="material-icons">lightbulb</span>
+        NUS Phishing Tips
+      </h2>
+      <div id="tips" class="tips"></div>
+    </div>
+
+    <footer>
+      <p>Protecting NUS students from phishing attacks</p>
+    </footer>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html> 
