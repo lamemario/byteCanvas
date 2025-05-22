@@ -30,7 +30,7 @@ ByteCanvas is a Chrome/Firefox extension that provides real-time protection agai
 - Chrome/Firefox browser
 - Git
 
-### Installation
+### Agreed Dependencies, Installations between Matthias and Mehdi
 
 1. Clone the repository:
 ```bash
@@ -65,7 +65,7 @@ byteCanvas/
 └── resources/        # Additional resources
 ```
 
-### Contributing
+### Intended github workflow for matthias and mehdi
 
 1. Create a new branch for your feature:
 ```bash
@@ -89,7 +89,3 @@ git push origin feature/your-feature-name
 
 - Matthias (Computer Engineering)
 - Sayyid (Information Security)
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.

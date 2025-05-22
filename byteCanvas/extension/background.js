@@ -198,7 +198,7 @@ async function analyzeLinks(links, tabId, frameId, redFlags) {
   chrome.storage.local.set({['scanResults_' + tabId]: analyzedLinks, ['redFlags_' + tabId]: redFlags || []});
 }
 
-// --- How to verify it's working ---
+// --- How to verify that google's API is working(Still doesn't work as intended though), API not invoked, can't see in action ---
 // 1. Open the extension and scan a page with a known malicious or phishing URL (e.g., https://testsafebrowsing.appspot.com/).
 // 2. If the link is flagged as dangerous, the API is working.
 // 3. You can also check the console for 'Safe Browsing API result for ...' logs.
