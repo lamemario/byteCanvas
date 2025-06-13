@@ -15,6 +15,14 @@ function scanAllLinks() {
   for (let link of pageLinks) {
     let href = link.getAttribute('href');
     let linkText = link.textContent.trim() || '';
+    // Check for onclick handlers that might contain URLs
+    let onclickUrl = link.getAttribute('onclick');
+    if (onclickUrl) {
+      const urlMatch = onclickUrl.match(/['"](https?:\/\/[^'"]+)['"]/);
+      if (urlMatch) {
+        href = urlMatch[1];
+      }
+    }
     if (isValidLinkUrl(href)) {
       links.push({
         url: link.href,
@@ -33,24 +41,38 @@ function scanAllLinks() {
       });
     }
   }
-  // Scan <button> tags (only actionable or suspicious)
-  const buttons = document.getElementsByTagName('button');
-  for (let btn of buttons) {
-    let btnText = btn.textContent.trim() || '';
-    let btnUrl = btn.getAttribute('data-url') || btn.getAttribute('formaction') || '';
-    // If type=submit and parent form has action, use that
-    if (!btnUrl && btn.type === 'submit' && btn.form && btn.form.action) {
-      btnUrl = btn.form.action;
+  // Scan <button> tags and other interactive elements
+  const interactiveElements = document.querySelectorAll('button, [role="button"], [role="link"], [onclick]');
+  for (let el of interactiveElements) {
+    let elText = el.textContent.trim() || '';
+    let elUrl = el.getAttribute('data-url') || 
+                el.getAttribute('formaction') || 
+                el.getAttribute('href') ||
+                el.getAttribute('data-href');
+    
+    // Check onclick attribute for URLs
+    const onclickAttr = el.getAttribute('onclick');
+    if (onclickAttr) {
+      const urlMatch = onclickAttr.match(/['"](https?:\/\/[^'"]+)['"]/);
+      if (urlMatch) {
+        elUrl = urlMatch[1];
+      }
     }
-    const triggers = findEmotionalTriggers(btnText);
+
+    // If type=submit and parent form has action, use that
+    if (!elUrl && el.type === 'submit' && el.form && el.form.action) {
+      elUrl = el.form.action;
+    }
+
+    const triggers = findEmotionalTriggers(elText);
     // Only include if actionable (valid URL) or suspicious (trigger word)
-    if ((btnUrl && isValidLinkUrl(btnUrl)) || triggers.length > 0) {
+    if ((elUrl && isValidLinkUrl(elUrl)) || triggers.length > 0) {
       links.push({
-        url: btnUrl,
-        text: btnText,
-        status: btnUrl && isValidLinkUrl(btnUrl) ? getLinkStatus(btnUrl) : 'invalid',
-        reason: btnUrl ? '' : 'No valid destination URL',
-        elementType: 'button',
+        url: elUrl,
+        text: elText,
+        status: elUrl && isValidLinkUrl(elUrl) ? getLinkStatus(elUrl) : 'invalid',
+        reason: elUrl ? '' : 'No valid destination URL',
+        elementType: el.tagName.toLowerCase(),
         triggers: triggers
       });
     }
@@ -112,19 +134,48 @@ const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
 function getLinkStatus(url) {
   try {
     const urlObj = new URL(url);
-    const hostname = urlObj.hostname;
-    // Only do basic heuristics here; background will do Safe Browsing and NUS list checks
-    if (hostname.includes('nus') && !hostname.endsWith('nus.edu.sg')) {
-      return 'warning';
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // Check if it's a trusted NUS domain
+    if (TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain))) {
+      return 'safe';
     }
-    const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf'];
+
+    // Check for NUS-specific patterns
+    if (hostname.includes('nus')) {
+      // If it contains 'nus' but isn't a trusted domain, mark as warning
+      if (!hostname.endsWith('nus.edu.sg') && !hostname.endsWith('nusmods.com')) {
+        return 'warning';
+      }
+    }
+
+    // Check for suspicious TLDs
+    const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw', '.top'];
     if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
       return 'danger';
     }
-    const phishingKeywords = ['login', 'signin', 'account', 'verify', 'secure', 'bank', 'paypal'];
+
+    // Check for phishing-related keywords in the hostname
+    const phishingKeywords = [
+      'login', 'signin', 'account', 'verify', 'secure', 'bank', 'paypal',
+      'password', 'reset', 'confirm', 'update', 'security', 'auth'
+    ];
     if (phishingKeywords.some(keyword => hostname.includes(keyword))) {
       return 'warning';
     }
+
+    // Check for URL patterns commonly used in phishing
+    const suspiciousPatterns = [
+      /login[^a-z]/i,
+      /sign[^a-z]/i,
+      /verify[^a-z]/i,
+      /secure[^a-z]/i,
+      /account[^a-z]/i
+    ];
+    if (suspiciousPatterns.some(pattern => pattern.test(hostname))) {
+      return 'warning';
+    }
+
     return 'safe';
   } catch (e) {
     return 'invalid';
@@ -190,7 +241,14 @@ const TRUSTED_DOMAINS = [
   'outlook.office.com',
   'office.com',
   'google.com',
-  'microsoft.com'
+  'microsoft.com',
+  'luminus.nus.edu.sg',
+  'ivle.nus.edu.sg',
+  'nusmods.com',
+  'nus.edu.sg',
+  'nus.edu',
+  'nusmods.com',
+  'nusmods.sg'
 ];
 
 // Helper to check if a URL is external
@@ -205,7 +263,14 @@ function isExternalUrl(url) {
 
 // Helper to check if a URL is valid and actionable
 function isValidLinkUrl(url) {
-  return url && /^(https?:|mailto:)/i.test(url);
+  if (!url) return false;
+  try {
+    const urlObj = new URL(url);
+    // Allow http, https, mailto, and tel protocols
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(urlObj.protocol);
+  } catch (e) {
+    return false;
+  }
 }
 
 // Gather red flags for the current page (improved)
