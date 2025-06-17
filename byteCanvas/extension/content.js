@@ -8,6 +8,43 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
   return true; // Keep the message channel open for async response
 });
 
+// --- Configurable security checks ---
+const CONFIG = {
+  ENABLE_SAFE_BROWSING: true,
+  ENABLE_NUS_LISTS: false, // Disabled by default, can be enabled for NUS users
+  ENABLE_GENERIC_CHECKS: true,
+  ENABLE_EMOTIONAL_TRIGGERS: true,
+  ENABLE_URL_PATTERN_CHECKS: true
+};
+
+// Universal trusted domains
+const UNIVERSAL_TRUSTED_DOMAINS = [
+  'google.com',
+  'microsoft.com',
+  'apple.com',
+  'amazon.com',
+  'facebook.com',
+  'linkedin.com',
+  'github.com',
+  'mozilla.org',
+  'cloudflare.com',
+  'paypal.com'
+];
+
+// NUS-specific domains (only used if ENABLE_NUS_LISTS is true)
+const NUS_WHITELIST = [
+  'nus.edu.sg',
+  'nusmods.com',
+  'ivle.nus.edu.sg',
+  'webmail.nus.edu.sg'
+];
+
+const NUS_BLACKLIST = [
+  // Add known phishing sites here
+];
+
+const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
+
 function scanAllLinks() {
   const links = [];
   // Scan <a> tags
@@ -31,7 +68,6 @@ function scanAllLinks() {
         elementType: 'link'
       });
     } else {
-      // Show user-friendly message for invalid/missing URLs
       links.push({
         url: href || '',
         text: linkText,
@@ -41,7 +77,8 @@ function scanAllLinks() {
       });
     }
   }
-  // Scan <button> tags and other interactive elements
+  
+  // Scan interactive elements
   const interactiveElements = document.querySelectorAll('button, [role="button"], [role="link"], [onclick]');
   for (let el of interactiveElements) {
     let elText = el.textContent.trim() || '';
@@ -64,8 +101,7 @@ function scanAllLinks() {
       elUrl = el.form.action;
     }
 
-    const triggers = findEmotionalTriggers(elText);
-    // Only include if actionable (valid URL) or suspicious (trigger word)
+    const triggers = CONFIG.ENABLE_EMOTIONAL_TRIGGERS ? findEmotionalTriggers(elText) : [];
     if ((elUrl && isValidLinkUrl(elUrl)) || triggers.length > 0) {
       links.push({
         url: elUrl,
@@ -80,100 +116,68 @@ function scanAllLinks() {
   return links;
 }
 
-function scanLinksInNode(node, links) {
-  // Find all <a> tags in this node
-  const anchorTags = node.querySelectorAll ? node.querySelectorAll('a') : [];
-  for (let link of anchorTags) {
-    let linkText = link.textContent.trim() || '';
-    let href = link.getAttribute('href');
-    let status = 'safe';
-    let url = '';
-    if (!href || href === '#' || href.trim() === '') {
-      status = 'broken';
-      url = href || '';
-    } else {
-      try {
-        url = link.href;
-        status = getLinkStatus(url);
-      } catch (e) {
-        status = 'invalid';
-        url = href;
-      }
-    }
-    links.push({
-      url: url,
-      text: linkText,
-      status: status
-    });
-  }
-  // Recursively scan shadow roots
-  if (node.querySelectorAll) {
-    const allElements = node.querySelectorAll('*');
-    for (let el of allElements) {
-      if (el.shadowRoot) {
-        scanLinksInNode(el.shadowRoot, links);
-      }
-    }
-  }
-}
-
-// --- Configurable security checks ---
-const ENABLE_SAFE_BROWSING = true; // Set to false to disable
-const ENABLE_NUS_LISTS = true; // Set to false to disable
-// TODO: Fill these with your actual data
-const NUS_WHITELIST = [
-  // 'nus.edu.sg', ...
-];
-const NUS_BLACKLIST = [
-  // 'phishingsite.com', ...
-];
-
-const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
-
-// Instead of async getLinkStatus, use a sync stub and send links to background for analysis
 function getLinkStatus(url) {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
     
-    // Check if it's a trusted NUS domain
-    if (TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain))) {
+    // Check universal trusted domains
+    if (UNIVERSAL_TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain))) {
       return 'safe';
     }
 
-    // Check for NUS-specific patterns
-    if (hostname.includes('nus')) {
-      // If it contains 'nus' but isn't a trusted domain, mark as warning
-      if (!hostname.endsWith('nus.edu.sg') && !hostname.endsWith('nusmods.com')) {
+    // NUS-specific checks (only if enabled)
+    if (CONFIG.ENABLE_NUS_LISTS) {
+      if (NUS_WHITELIST.some(domain => hostname.endsWith(domain))) {
+        return 'safe';
+      }
+      if (NUS_BLACKLIST.some(domain => hostname.endsWith(domain))) {
+        return 'danger';
+      }
+    }
+
+    // Generic security checks
+    if (CONFIG.ENABLE_GENERIC_CHECKS) {
+      // Check for suspicious TLDs
+      const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw', '.top', '.info', '.biz', '.click', '.download'];
+      if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
+        return 'warning';
+      }
+
+      // Check for IP addresses in hostname
+      if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+        return 'warning';
+      }
+
+      // Check for excessive subdomains
+      if (hostname.split('.').length > 4) {
         return 'warning';
       }
     }
 
-    // Check for suspicious TLDs
-    const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw', '.top'];
-    if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
-      return 'danger';
-    }
+    // URL pattern checks
+    if (CONFIG.ENABLE_URL_PATTERN_CHECKS) {
+      const suspiciousPatterns = [
+        /login[^a-z]/i,
+        /sign[^a-z]/i,
+        /verify[^a-z]/i,
+        /secure[^a-z]/i,
+        /account[^a-z]/i,
+        /password[^a-z]/i,
+        /bank[^a-z]/i,
+        /pay[^a-z]/i,
+        /update[^a-z]/i,
+        /confirm[^a-z]/i
+      ];
+      
+      if (suspiciousPatterns.some(pattern => pattern.test(hostname))) {
+        return 'warning';
+      }
 
-    // Check for phishing-related keywords in the hostname
-    const phishingKeywords = [
-      'login', 'signin', 'account', 'verify', 'secure', 'bank', 'paypal',
-      'password', 'reset', 'confirm', 'update', 'security', 'auth'
-    ];
-    if (phishingKeywords.some(keyword => hostname.includes(keyword))) {
-      return 'warning';
-    }
-
-    // Check for URL patterns commonly used in phishing
-    const suspiciousPatterns = [
-      /login[^a-z]/i,
-      /sign[^a-z]/i,
-      /verify[^a-z]/i,
-      /secure[^a-z]/i,
-      /account[^a-z]/i
-    ];
-    if (suspiciousPatterns.some(pattern => pattern.test(hostname))) {
-      return 'warning';
+      // Check for mixed content
+      if (window.location.protocol === 'https:' && urlObj.protocol === 'http:') {
+        return 'warning';
+      }
     }
 
     return 'safe';
@@ -182,10 +186,42 @@ function getLinkStatus(url) {
   }
 }
 
-// Emotional trigger words for phishing detection
+// Enhanced emotional trigger words for phishing detection
 const EMOTIONAL_TRIGGERS = [
-  'urgent', 'immediately', 'act now', 'help', 'verify', 'alert', 'warning', 'limited time', 'important', 'attention', 'security', 'update', 'required', 'action needed', 'suspended', 'confirm', 'reset', 'danger', 'threat', 'problem', 'failure', 'account', 'password', 'login', 'sign in', 'click here', 'exclusive', 'offer', 'free', 'congratulations', 'winner', 'claim', 'refund', 'prize', 'risk', 'locked', 'unusual', 'suspicious', 'review', 'reactivate', 'access', 'protect', 'notice', 'reminder', 'final', 'deadline', 'limited', 'now', 'today', 'asap'
+  // Urgency triggers
+  'urgent', 'immediately', 'act now', 'limited time', 'expires', 'deadline', 'today only',
+  // Fear triggers
+  'warning', 'alert', 'suspended', 'locked', 'blocked', 'compromised', 'unauthorized',
+  // Greed triggers
+  'free', 'discount', 'offer', 'prize', 'winner', 'congratulations', 'exclusive',
+  // Trust triggers
+  'verify', 'confirm', 'validate', 'secure', 'official', 'authentic', 'legitimate',
+  // Action triggers
+  'click here', 'download', 'update', 'upgrade', 'install', 'subscribe', 'register',
+  // Security triggers
+  'password', 'login', 'sign in', 'account', 'security', 'protect', 'secure',
+  // Social proof triggers
+  'popular', 'trending', 'viral', 'recommended', 'best-selling', 'top-rated'
 ];
+
+function findEmotionalTriggers(text) {
+  if (!text) return [];
+  const found = [];
+  for (const word of EMOTIONAL_TRIGGERS) {
+    if (text.toLowerCase().includes(word)) found.push(word);
+  }
+  return found;
+}
+
+function isValidLinkUrl(url) {
+  if (!url) return false;
+  try {
+    new URL(url);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 // Helper to scan for emotional triggers in text
 function findEmotionalTriggers(text) {
