@@ -6,19 +6,25 @@ document.addEventListener('DOMContentLoaded', function() {
   const results = document.getElementById('results');
   const tips = document.getElementById('tips');
   const linkCount = document.getElementById('linkCount');
+  const statusElement = document.getElementById('status');
+  const tabButtons = document.querySelectorAll('.tab-button');
+  
+  let currentTab = 'all';
+  let scanResults = [];
 
   // Load tips
   loadTips();
 
-  // Load scan results and red flags from storage for this tab
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    const tabId = tabs[0].id;
-    chrome.storage.local.get(['scanResults_' + tabId, 'redFlags_' + tabId], function(data) {
-      const links = data['scanResults_' + tabId] || [];
-      const redFlags = data['redFlags_' + tabId] || [];
-      displayRedFlags(redFlags);
-      displayResults(links);
-      linkCount.textContent = `${links.length} links`;
+  // Load initial results
+  loadResults();
+
+  // Set up tab switching
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+      currentTab = button.dataset.tab;
+      displayResults();
     });
   });
 
@@ -26,43 +32,47 @@ document.addEventListener('DOMContentLoaded', function() {
   chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
     const tabId = tabs[0].id;
     chrome.storage.onChanged.addListener(function(changes, area) {
-      if (area === 'local' && changes['scanResults_' + tabId]) {
-        const links = changes['scanResults_' + tabId].newValue || [];
-        displayResults(links);
-        linkCount.textContent = `${links.length} links`;
-        scanStatus.textContent = 'Scan complete!';
-        scanStatus.style.backgroundColor = 'var(--success-color)';
-        scanStatus.style.color = 'white';
+      if (area === 'local') {
+        if (changes['scanResults_' + tabId]) {
+          const elements = changes['scanResults_' + tabId].newValue || [];
+          scanResults = elements;
+          chrome.storage.local.set({['scanResults_' + tabId]: scanResults});
+          displayResults();
+          linkCount.textContent = `${elements.length} elements`;
+          scanStatus.textContent = 'Scan complete!';
+          scanStatus.style.backgroundColor = 'var(--success-color)';
+          scanStatus.style.color = 'white';
+        }
+        if (changes['redFlags_' + tabId]) {
+          const redFlags = changes['redFlags_' + tabId].newValue || [];
+          displayRedFlags(redFlags);
+        }
       }
     });
   });
 
   // Scan button click handler (manual scan)
   scanButton.addEventListener('click', function() {
+    statusElement.textContent = 'Scanning...';
     scanButton.disabled = true;
-    scanButton.innerHTML = '<span class="material-icons rotating">sync</span> Scanning...';
-    scanStatus.textContent = 'Scanning page for suspicious links...';
-    scanStatus.style.backgroundColor = 'var(--surface-color)';
+    
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
       chrome.tabs.sendMessage(tabs[0].id, {action: "scanLinks"}, function(response) {
         if (chrome.runtime.lastError) {
-          scanStatus.textContent = 'Error: Could not scan page. Please refresh and try again.';
-          scanStatus.style.backgroundColor = 'var(--error-color)';
-          scanStatus.style.color = 'white';
-        } else if (response && response.links) {
-          displayResults(response.links);
-          linkCount.textContent = `${response.links.length} links`;
-          scanStatus.textContent = 'Scan complete!';
-          scanStatus.style.backgroundColor = 'var(--success-color)';
-          scanStatus.style.color = 'white';
-          // Save results for background sync
-          chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            const tabId = tabs[0].id;
-            chrome.storage.local.set({['scanResults_' + tabId]: response.links});
-          });
+          statusElement.textContent = 'Error: Could not scan page';
+          scanButton.disabled = false;
+          return;
+        }
+        
+        if (response && response.elements) {
+          scanResults = response.elements;
+          chrome.storage.local.set({['scanResults_' + tabs[0].id]: scanResults});
+          displayResults();
+          statusElement.textContent = `Found ${scanResults.length} elements`;
+        } else {
+          statusElement.textContent = 'No elements found';
         }
         scanButton.disabled = false;
-        scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
       });
     });
   });
@@ -91,162 +101,49 @@ document.addEventListener('DOMContentLoaded', function() {
       reportButton.click();
     }
   });
-});
 
-function displayResults(links) {
-  const results = document.getElementById('results');
-  if (links.length === 0) {
-    results.innerHTML = `
-      <div class="empty-state">
-        <span class="material-icons">search</span>
-        <p>No links found on this page</p>
-      </div>
-    `;
-    return;
-  }
-  let html = '<ul class="link-list">';
-  links.forEach(link => {
-    const status = getStatusInfo(link.status);
-    const urlDisplay = link.url ? `<div class="link-url-full"><a href="${link.url}" target="_blank" rel="noopener noreferrer">${link.url}</a> <button class="copy-url" data-url="${link.url}" title="Copy URL"><span class="material-icons">content_copy</span></button></div>` : '';
-    const domain = link.url ? (new URL(link.url)).hostname : '';
-    const badges = getLinkBadges(link.url, link.elementType);
-    const reason = link.reason ? `<div class="link-reason">${link.reason}</div>` : '';
-    const invalidClass = link.status === 'invalid' ? 'link-invalid-deemph' : '';
-    const invalidTooltip = link.status === 'invalid' && link.reason ? `title="${link.reason}"` : '';
-    html += `
-      <li class="link-item ${status.class} ${invalidClass}" ${invalidTooltip}>
-        <span class="material-icons">${status.icon}</span>
-        <div class="link-info">
-          <div class="link-text">${getLinkTitle(link)}</div>
-          ${urlDisplay}
-          <div class="link-meta">${badges.join(' ')}${domain ? `<span class='meta-domain'>${domain}</span>` : ''}</div>
-          ${reason}
-          <div class="link-status">${status.text}</div>
-        </div>
-      </li>
-    `;
-  });
-  html += '</ul>';
-  results.innerHTML = html;
-  // Add copy event listeners
-  document.querySelectorAll('.copy-url').forEach(btn => {
-    btn.addEventListener('click', function() {
-      const url = this.getAttribute('data-url');
-      navigator.clipboard.writeText(url);
-      this.title = 'Copied!';
-      setTimeout(() => { this.title = 'Copy URL'; }, 1000);
+  function loadResults() {
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+      chrome.storage.local.get(['scanResults_' + tabs[0].id], function(result) {
+        if (result['scanResults_' + tabs[0].id]) {
+          scanResults = result['scanResults_' + tabs[0].id];
+          displayResults();
+          statusElement.textContent = `Found ${scanResults.length} elements`;
+        }
+      });
     });
-  });
-}
-
-function getStatusInfo(status) {
-  const statuses = {
-    safe: { class: 'link-safe', icon: 'check_circle', text: 'Safe' },
-    warning: { class: 'link-warning', icon: 'warning', text: 'Suspicious' },
-    danger: { class: 'link-danger', icon: 'dangerous', text: 'Dangerous' },
-    broken: { class: 'link-broken', icon: 'link_off', text: 'Broken Link' },
-    invalid: { class: 'link-invalid', icon: 'error', text: 'Invalid Link' }
-  };
-  return statuses[status] || statuses.warning;
-}
-
-function truncateUrl(url) {
-  try {
-    const urlObj = new URL(url);
-    return urlObj.hostname + urlObj.pathname.substring(0, 20) + (urlObj.pathname.length > 20 ? '...' : '');
-  } catch {
-    return url.substring(0, 40) + (url.length > 40 ? '...' : '');
   }
-}
 
-function loadTips() {
-  const tips = [
-    {
-      icon: 'email',
-      text: "Be cautious of emails asking for your NUS credentials"
-    },
-    {
-      icon: 'link',
-      text: "Check the URL carefully before logging in"
-    },
-    {
-      icon: 'lock',
-      text: "Never share your NUS password with anyone"
-    },
-    {
-      icon: 'security',
-      text: "Look for the padlock icon in your browser's address bar"
+  function displayResults() {
+    if (!scanResults || scanResults.length === 0) {
+      results.innerHTML = '<div class="scan-message">Click "Scan Now" to check the page</div>';
+      return;
     }
-  ];
 
-  const tipsElement = document.getElementById('tips');
-  let html = '<ul class="tips-list">';
-  tips.forEach(tip => {
-    html += `
-      <li class="tip-item">
-        <span class="material-icons">${tip.icon}</span>
-        <span>${tip.text}</span>
-      </li>
-    `;
-  });
-  html += '</ul>';
-  tipsElement.innerHTML = html;
-}
+    const filteredResults = scanResults.filter(element => {
+      if (currentTab === 'all') return true;
+      if (currentTab === 'safe') return element.status === 'safe';
+      if (currentTab === 'warning') return element.status === 'warning';
+      if (currentTab === 'danger') return element.status === 'danger';
+      return true;
+    });
 
-function getLinkBadges(url, elementType) {
-  const badges = [];
-  try {
-    if (elementType === 'button') {
-      badges.push(`<span class='badge badge-button' title='This is a clickable button. Buttons may submit forms, open dialogs, or trigger actions.'><span class='material-icons'>smart_button</span> Button</span>`);
-    } else if (elementType === 'link') {
-      badges.push(`<span class='badge badge-link' title='This is a hyperlink. Links usually open a new page or site.'><span class='material-icons'>link</span> Link</span>`);
-    }
-    if (!url) return badges;
-    const u = new URL(url);
-    if (u.protocol === 'mailto:') badges.push(`<span class='badge badge-mail' title='This will open your email client.'><span class='material-icons'>email</span> Mail</span>`);
-    if (u.protocol === 'tel:') badges.push(`<span class='badge badge-tel' title='This will initiate a phone call.'><span class='material-icons'>call</span> Phone</span>`);
-    if (u.hostname !== window.location.hostname) badges.push(`<span class='badge badge-external' title='This link goes to an external website.'><span class='material-icons'>open_in_new</span> External</span>`);
-    if (u.hostname === window.location.hostname) badges.push(`<span class='badge badge-internal' title='This link stays within this website.'><span class='material-icons'>home</span> Internal</span>`);
-    if (/\.(pdf|docx?|xlsx?|pptx?)$/i.test(u.pathname)) badges.push(`<span class='badge badge-download' title='This link downloads a file.'><span class='material-icons'>download</span> Download</span>`);
-    if (/track|utm_|click|redirect/i.test(url)) badges.push(`<span class='badge badge-tracking' title='This link may be tracked for analytics or marketing.'><span class='material-icons'>track_changes</span> Tracking</span>`);
-  } catch {}
-  return badges;
-}
-
-function getLinkTitle(link) {
-  let prefix = '';
-  if (link.elementType === 'button') prefix = 'Button: ';
-  else if (link.elementType === 'link') prefix = '';
-  if (link.text && link.text.trim() && link.text.trim() !== link.url) return prefix + link.text.trim();
-  try {
-    const u = new URL(link.url);
-    if (u.protocol === 'mailto:') return prefix + u.pathname;
-    if (/unsubscribe/i.test(link.url)) return prefix + 'Unsubscribe';
-    if (/login|signin/i.test(link.url)) return prefix + 'Sign In';
-    if (/register|signup/i.test(link.url)) return prefix + 'Register';
-    if (/reset|forgot/i.test(link.url)) return prefix + 'Reset Password';
-    if (/download/i.test(link.url)) return prefix + 'Download';
-    if (/track|utm_|click|redirect/i.test(link.url)) return prefix + 'Tracking Link';
-    if (/add.*calendar/i.test(link.url)) return prefix + 'Add to Calendar';
-    if (/profile/i.test(link.url)) return prefix + 'Profile';
-    if (/account/i.test(link.url)) return prefix + 'Account';
-    if (/search/i.test(link.url)) return prefix + 'Search';
-    if (/maps/i.test(link.url)) return prefix + 'Maps';
-    if (/mail/i.test(link.url)) return prefix + 'Mail';
-    if (/form/i.test(link.url)) return prefix + 'Form';
-    if (/read/i.test(link.url)) return prefix + 'Read Now';
-    if (/address/i.test(link.url)) return prefix + 'Address Book';
-    if (/preferences/i.test(link.url)) return prefix + 'Preferences';
-    if (/submit/i.test(link.url)) return prefix + 'Submit';
-    if (/verify/i.test(link.url)) return prefix + 'Verify';
-    if (/secure/i.test(link.url)) return prefix + 'Secure Link';
-    if (/external/i.test(link.url)) return prefix + 'External Link';
-    if (/internal/i.test(link.url)) return prefix + 'Internal Link';
-    return prefix + u.hostname;
-  } catch {
-    return prefix + '(no text)';
+    results.innerHTML = filteredResults.map(element => `
+      <div class="element-card ${element.status}">
+        <div class="element-type">${element.elementType}</div>
+        <div class="element-text">${element.text || 'No text'}</div>
+        ${element.url ? `<div class="element-url">${element.url}</div>` : ''}
+        <div class="element-status ${element.status}">
+          ${element.status === 'safe' ? '✓ Safe' : 
+            element.status === 'warning' ? '⚠ Warning' : 
+            element.status === 'danger' ? '⚠ Danger' : 'Unknown'}
+          ${element.reason ? ` - ${element.reason}` : ''}
+        </div>
+        ${element.path ? `<div class="element-path">${element.path}</div>` : ''}
+      </div>
+    `).join('');
   }
-}
+});
 
 function displayRedFlags(redFlags) {
   let container = document.getElementById('redFlags');
@@ -316,4 +213,112 @@ function displayRedFlags(redFlags) {
   }
   html += '</div>';
   container.innerHTML = html;
+}
+
+function loadTips() {
+  const tips = [
+    {
+      icon: 'email',
+      text: "Be cautious of emails asking for your NUS credentials"
+    },
+    {
+      icon: 'link',
+      text: "Check the URL carefully before logging in"
+    },
+    {
+      icon: 'lock',
+      text: "Never share your NUS password with anyone"
+    },
+    {
+      icon: 'security',
+      text: "Look for the padlock icon in your browser's address bar"
+    }
+  ];
+
+  const tipsElement = document.getElementById('tips');
+  let html = '<ul class="tips-list">';
+  tips.forEach(tip => {
+    html += `
+      <li class="tip-item">
+        <span class="material-icons">${tip.icon}</span>
+        <span>${tip.text}</span>
+      </li>
+    `;
+  });
+  html += '</ul>';
+  tipsElement.innerHTML = html;
+}
+
+function getElementBadges(element) {
+  const badges = [];
+  
+  // Element type badge
+  if (element.elementType) {
+    const typeIcon = {
+      'link': 'link',
+      'button': 'smart_button',
+      'input': 'input',
+      'menuitem': 'menu',
+      'tab': 'tab',
+      'option': 'list',
+      'interactive': 'touch_app'
+    }[element.elementType] || 'touch_app';
+    
+    badges.push(`<span class='badge badge-${element.elementType}' title='This is a ${element.elementType} element'>
+      <span class='material-icons'>${typeIcon}</span> ${element.elementType.charAt(0).toUpperCase() + element.elementType.slice(1)}
+    </span>`);
+  }
+  
+  // Emotional triggers badge
+  if (element.triggers && element.triggers.length > 0) {
+    badges.push(`<span class='badge badge-trigger' title='Contains emotional triggers: ${element.triggers.join(", ")}'>
+      <span class='material-icons'>warning</span> Emotional Triggers
+    </span>`);
+  }
+  
+  return badges;
+}
+
+function getLinkTitle(link) {
+  let prefix = '';
+  if (link.elementType === 'button') prefix = 'Button: ';
+  else if (link.elementType === 'link') prefix = '';
+  if (link.text && link.text.trim() && link.text.trim() !== link.url) return prefix + link.text.trim();
+  try {
+    const u = new URL(link.url);
+    if (u.protocol === 'mailto:') return prefix + u.pathname;
+    if (/unsubscribe/i.test(link.url)) return prefix + 'Unsubscribe';
+    if (/login|signin/i.test(link.url)) return prefix + 'Sign In';
+    if (/register|signup/i.test(link.url)) return prefix + 'Register';
+    if (/reset|forgot/i.test(link.url)) return prefix + 'Reset Password';
+    if (/download/i.test(link.url)) return prefix + 'Download';
+    if (/track|utm_|click|redirect/i.test(link.url)) return prefix + 'Tracking Link';
+    if (/add.*calendar/i.test(link.url)) return prefix + 'Add to Calendar';
+    if (/profile/i.test(link.url)) return prefix + 'Profile';
+    if (/account/i.test(link.url)) return prefix + 'Account';
+    if (/search/i.test(link.url)) return prefix + 'Search';
+    if (/maps/i.test(link.url)) return prefix + 'Maps';
+    if (/mail/i.test(link.url)) return prefix + 'Mail';
+    if (/form/i.test(link.url)) return prefix + 'Form';
+    if (/read/i.test(link.url)) return prefix + 'Read Now';
+    if (/address/i.test(link.url)) return prefix + 'Address Book';
+    if (/preferences/i.test(link.url)) return prefix + 'Preferences';
+    if (/submit/i.test(link.url)) return prefix + 'Submit';
+    if (/verify/i.test(link.url)) return prefix + 'Verify';
+    if (/secure/i.test(link.url)) return prefix + 'Secure Link';
+    if (/external/i.test(link.url)) return prefix + 'External Link';
+    if (/internal/i.test(link.url)) return prefix + 'Internal Link';
+    return prefix + u.hostname;
+  } catch {
+    return prefix + '(no text)';
+  }
+}
+
+function truncateUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname + urlObj.pathname.substring(0, 20) + (urlObj.pathname.length > 20 ? '...' : '');
+  } catch {
+    return url.substring(0, 40) + (url.length > 40 ? '...' : '');
+  }
 } 

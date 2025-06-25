@@ -1,220 +1,386 @@
-// Listen for messages from the popup
-chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-  if (request.action === "scanLinks") {
-    const links = scanAllLinks();
-    console.log('Scanned links:', links); // Debug log
-    sendResponse({links: links});
-  }
-  return true; // Keep the message channel open for async response
-});
-
-// --- Configurable security checks ---
+// Configuration
 const CONFIG = {
   ENABLE_SAFE_BROWSING: true,
-  ENABLE_NUS_LISTS: false, // Disabled by default, can be enabled for NUS users
+  ENABLE_NUS_LISTS: true,
   ENABLE_GENERIC_CHECKS: true,
   ENABLE_EMOTIONAL_TRIGGERS: true,
-  ENABLE_URL_PATTERN_CHECKS: true
+  ENABLE_URL_PATTERN_CHECKS: true,
+  DEBUG_MODE: true // Enable debug logging
 };
 
-// Universal trusted domains
-const UNIVERSAL_TRUSTED_DOMAINS = [
-  'google.com',
-  'microsoft.com',
-  'apple.com',
-  'amazon.com',
-  'facebook.com',
-  'linkedin.com',
-  'github.com',
-  'mozilla.org',
-  'cloudflare.com',
-  'paypal.com'
-];
-
-// NUS-specific domains (only used if ENABLE_NUS_LISTS is true)
+// NUS-specific domains
 const NUS_WHITELIST = [
   'nus.edu.sg',
   'nusmods.com',
   'ivle.nus.edu.sg',
-  'webmail.nus.edu.sg'
+  'webmail.nus.edu.sg',
+  'outlook.office.com',
+  'office365.com',
+  'instructure.com',
+  'canvas.nus.edu.sg',
+  'luminus.nus.edu.sg'
 ];
 
-const NUS_BLACKLIST = [
-  // Add known phishing sites here
+// Trusted domains that should not trigger warnings
+const TRUSTED_DOMAINS = [
+  'microsoft.com',
+  'office.com',
+  'outlook.com',
+  'live.com',
+  'sharepoint.com',
+  'onedrive.com',
+  'teams.microsoft.com',
+  'portal.office.com',
+  'login.microsoftonline.com',
+  'outlook.office365.com',
+  'outlook.office.com',
+  'mail.office365.com',
+  'mail.office.com',
+  'owa.nus.edu.sg',
+  'webmail.nus.edu.sg',
+  'canvas.nus.edu.sg',
+  'instructure.com',
+  'nus.edu.sg',
+  'nusmods.com',
+  'ivle.nus.edu.sg',
+  'luminus.nus.edu.sg'
 ];
 
-const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
+// Canvas-specific selectors to ignore
+const CANVAS_IGNORE_SELECTORS = [
+  '.ic-app-header',
+  '.ic-app-nav',
+  '.ic-app-main-content',
+  '.ic-app-footer',
+  '.ic-app-header__main-navigation',
+  '.ic-app-header__secondary-navigation',
+  '.ic-app-header__utilities',
+  '.ic-app-header__menu',
+  '.ic-app-header__menu-list',
+  '.ic-app-header__menu-item'
+];
 
-function scanAllLinks() {
-  const links = [];
-  // Scan <a> tags
-  const pageLinks = document.getElementsByTagName('a');
-  for (let link of pageLinks) {
-    let href = link.getAttribute('href');
-    let linkText = link.textContent.trim() || '';
-    // Check for onclick handlers that might contain URLs
-    let onclickUrl = link.getAttribute('onclick');
-    if (onclickUrl) {
-      const urlMatch = onclickUrl.match(/['"](https?:\/\/[^'"]+)['"]/);
-      if (urlMatch) {
-        href = urlMatch[1];
-      }
+// Webmail-specific selectors to ignore
+const WEBMAIL_IGNORE_SELECTORS = [
+  '.ms-Fabric',
+  '.ms-Button',
+  '.ms-Link',
+  '.ms-Nav',
+  '.ms-CommandBar',
+  '.ms-CommandBarItem',
+  '.ms-CommandBarItem-link',
+  '.ms-CommandBarItem-icon',
+  '.ms-CommandBarItem-text',
+  '.ms-CommandBarItem-overflow',
+  '.ms-CommandBarItem-overflowButton',
+  '.ms-CommandBarItem-overflowButton-icon',
+  '.ms-CommandBarItem-overflowButton-text',
+  '.ms-CommandBarItem-overflowButton-overflow',
+  '.ms-CommandBarItem-overflowButton-overflowButton',
+  '.ms-CommandBarItem-overflowButton-overflowButton-icon',
+  '.ms-CommandBarItem-overflowButton-overflowButton-text',
+  '.ms-CommandBarItem-overflowButton-overflowButton-overflow'
+];
+
+// Listen for messages from the popup
+chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+  if (request.action === "scanLinks") {
+    console.log('Received scan request');
+    const elements = quickScanInteractiveElements();
+    console.log('Scanned elements:', elements);
+    sendResponse({elements: elements});
+  }
+  return true;
+});
+
+function quickScanInteractiveElements() {
+  console.log('Starting element scan');
+  const elements = [];
+  
+  // Skip if we're in an iframe
+  if (window !== window.top) {
+    console.log('Skipping scan in iframe');
+    return elements;
+  }
+
+  // Get all interactive elements
+  const interactiveElements = document.querySelectorAll('a[href], button, [role="button"], [role="link"], [onclick], [data-url], [data-href], form[action]');
+  console.log('Found interactive elements:', interactiveElements.length);
+
+  // Process each element
+  for (const element of interactiveElements) {
+    // Skip elements that are part of the browser UI
+    if (isBrowserUIElement(element)) {
+      continue;
     }
-    if (isValidLinkUrl(href)) {
-      links.push({
-        url: link.href,
-        text: linkText,
-        status: getLinkStatus(link.href),
-        elementType: 'link'
-      });
-    } else {
-      links.push({
-        url: href || '',
-        text: linkText,
-        status: 'invalid',
-        reason: 'No valid destination URL',
-        elementType: 'link'
-      });
+    
+    // Skip elements that are part of the page's UI framework
+    if (isFrameworkUIElement(element)) {
+      continue;
     }
+    
+    // Skip elements that are part of the email content
+    if (isEmailContentElement(element)) {
+      continue;
+    }
+
+    // Skip elements with no visible text or purpose
+    const description = getElementDescription(element);
+    if (description === 'Clickable element' || !description.trim()) {
+      continue;
+    }
+
+    // Skip elements that are too small or hidden
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10 || rect.width === 0 || rect.height === 0) {
+      continue;
+    }
+
+    // Skip elements with no visible text
+    const style = window.getComputedStyle(element);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+      continue;
+    }
+    
+    const details = {
+      type: getElementType(element),
+      text: description,
+      status: 'safe', // Default to safe for trusted domains
+      elementType: getElementType(element)
+    };
+
+    // Quick URL check
+    const url = element.href || 
+                element.getAttribute('href') || 
+                element.getAttribute('data-url') || 
+                element.getAttribute('data-href') ||
+                element.getAttribute('formaction') ||
+                element.getAttribute('action');
+
+    if (url && isValidLinkUrl(url)) {
+      details.url = url;
+      const statusInfo = getLinkStatus(url);
+      details.status = statusInfo.status;
+      details.reason = statusInfo.reason;
+    }
+
+    elements.push(details);
+  }
+
+  console.log('Scan complete. Found elements:', elements.length);
+  return elements;
+}
+
+function isBrowserUIElement(element) {
+  const browserUIIdentifiers = [
+    'chrome-extension',
+    'moz-extension',
+    'edge-extension',
+    'browser-extension',
+    'browser-ui',
+    'chrome-ui',
+    'moz-ui',
+    'edge-ui'
+  ];
+  
+  const elementClasses = element.className.toLowerCase();
+  const elementId = element.id.toLowerCase();
+  
+  return browserUIIdentifiers.some(id => 
+    elementClasses.includes(id) || 
+    elementId.includes(id) ||
+    element.tagName.toLowerCase() === 'iframe' && element.src.includes(id)
+  );
+}
+
+function isFrameworkUIElement(element) {
+  // Check if element is part of Canvas UI
+  if (window.location.hostname.includes('canvas.nus.edu.sg')) {
+    const canvasSelectors = [
+      '.ic-app-header__menu',
+      '.ic-app-header__menu-list',
+      '.ic-app-header__menu-item',
+      '.ic-app-header__utilities',
+      '.ic-app-header__secondary-navigation',
+      '.ic-app-header__main-navigation',
+      '.ic-app-header__logo',
+      '.ic-app-header__logomark',
+      '.ic-app-header__logomark-container',
+      '.ic-app-header__logomark-container-image',
+      '.ic-app-header__logomark-container-image-container',
+      '.ic-app-header__logomark-container-image-container-image',
+      '.ic-app-header__logomark-container-image-container-image-image',
+      '.ic-app-header__logomark-container-image-container-image-image-image',
+      '.ic-app-header__logomark-container-image-container-image-image-image-image'
+    ];
+    
+    return canvasSelectors.some(selector => 
+      element.matches(selector) || 
+      element.closest(selector)
+    );
   }
   
-  // Scan interactive elements
-  const interactiveElements = document.querySelectorAll('button, [role="button"], [role="link"], [onclick]');
-  for (let el of interactiveElements) {
-    let elText = el.textContent.trim() || '';
-    let elUrl = el.getAttribute('data-url') || 
-                el.getAttribute('formaction') || 
-                el.getAttribute('href') ||
-                el.getAttribute('data-href');
+  // Check if element is part of Webmail UI
+  if (window.location.hostname.includes('outlook.office.com')) {
+    const webmailSelectors = [
+      '.ms-CommandBar',
+      '.ms-CommandBarItem',
+      '.ms-CommandBarItem-link',
+      '.ms-CommandBarItem-icon',
+      '.ms-CommandBarItem-text',
+      '.ms-CommandBarItem-overflow',
+      '.ms-CommandBarItem-overflowButton',
+      '.ms-CommandBarItem-overflowButton-icon',
+      '.ms-CommandBarItem-overflowButton-text',
+      '.ms-CommandBarItem-overflowButton-overflow',
+      '.ms-CommandBarItem-overflowButton-overflowButton',
+      '.ms-CommandBarItem-overflowButton-overflowButton-icon',
+      '.ms-CommandBarItem-overflowButton-overflowButton-text',
+      '.ms-CommandBarItem-overflowButton-overflowButton-overflow',
+      '.ms-CommandBarItem-overflowButton-overflowButton-overflowButton',
+      '.ms-CommandBarItem-overflowButton-overflowButton-overflowButton-icon',
+      '.ms-CommandBarItem-overflowButton-overflowButton-overflowButton-text',
+      '.ms-CommandBarItem-overflowButton-overflowButton-overflowButton-overflow'
+    ];
     
-    // Check onclick attribute for URLs
-    const onclickAttr = el.getAttribute('onclick');
-    if (onclickAttr) {
-      const urlMatch = onclickAttr.match(/['"](https?:\/\/[^'"]+)['"]/);
-      if (urlMatch) {
-        elUrl = urlMatch[1];
-      }
-    }
-
-    // If type=submit and parent form has action, use that
-    if (!elUrl && el.type === 'submit' && el.form && el.form.action) {
-      elUrl = el.form.action;
-    }
-
-    const triggers = CONFIG.ENABLE_EMOTIONAL_TRIGGERS ? findEmotionalTriggers(elText) : [];
-    if ((elUrl && isValidLinkUrl(elUrl)) || triggers.length > 0) {
-      links.push({
-        url: elUrl,
-        text: elText,
-        status: elUrl && isValidLinkUrl(elUrl) ? getLinkStatus(elUrl) : 'invalid',
-        reason: elUrl ? '' : 'No valid destination URL',
-        elementType: el.tagName.toLowerCase(),
-        triggers: triggers
-      });
-    }
+    return webmailSelectors.some(selector => 
+      element.matches(selector) || 
+      element.closest(selector)
+    );
   }
-  return links;
+  
+  return false;
 }
 
-function getLinkStatus(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    
-    // Check universal trusted domains
-    if (UNIVERSAL_TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain))) {
-      return 'safe';
-    }
-
-    // NUS-specific checks (only if enabled)
-    if (CONFIG.ENABLE_NUS_LISTS) {
-      if (NUS_WHITELIST.some(domain => hostname.endsWith(domain))) {
-        return 'safe';
-      }
-      if (NUS_BLACKLIST.some(domain => hostname.endsWith(domain))) {
-        return 'danger';
-      }
-    }
-
-    // Generic security checks
-    if (CONFIG.ENABLE_GENERIC_CHECKS) {
-      // Check for suspicious TLDs
-      const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw', '.top', '.info', '.biz', '.click', '.download'];
-      if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
-        return 'warning';
-      }
-
-      // Check for IP addresses in hostname
-      if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
-        return 'warning';
-      }
-
-      // Check for excessive subdomains
-      if (hostname.split('.').length > 4) {
-        return 'warning';
-      }
-    }
-
-    // URL pattern checks
-    if (CONFIG.ENABLE_URL_PATTERN_CHECKS) {
-      const suspiciousPatterns = [
-        /login[^a-z]/i,
-        /sign[^a-z]/i,
-        /verify[^a-z]/i,
-        /secure[^a-z]/i,
-        /account[^a-z]/i,
-        /password[^a-z]/i,
-        /bank[^a-z]/i,
-        /pay[^a-z]/i,
-        /update[^a-z]/i,
-        /confirm[^a-z]/i
-      ];
-      
-      if (suspiciousPatterns.some(pattern => pattern.test(hostname))) {
-        return 'warning';
-      }
-
-      // Check for mixed content
-      if (window.location.protocol === 'https:' && urlObj.protocol === 'http:') {
-        return 'warning';
-      }
-    }
-
-    return 'safe';
-  } catch (e) {
-    return 'invalid';
+function isEmailContentElement(element) {
+  if (!window.location.hostname.includes('outlook.office.com')) {
+    return false;
   }
+  
+  // Skip elements that are part of the email content
+  const emailContentSelectors = [
+    '.ms-ReadingPane',
+    '.ms-ReadingPane-containerBody',
+    '.ms-ReadingPane-containerBodyContent',
+    '.ms-ReadingPane-containerBodyContentBody',
+    '.ms-ReadingPane-containerBodyContentBodyContent',
+    '.ms-ReadingPane-containerBodyContentBodyContentBody',
+    '.ms-ReadingPane-containerBodyContentBodyContentBodyContent',
+    '.ms-ReadingPane-containerBodyContentBodyContentBodyContentBody',
+    '.ms-ReadingPane-containerBodyContentBodyContentBodyContentBodyContent',
+    '.ms-ReadingPane-containerBodyContentBodyContentBodyContentBodyContentBody'
+  ];
+  
+  return emailContentSelectors.some(selector => 
+    element.matches(selector) || 
+    element.closest(selector)
+  );
 }
 
-// Enhanced emotional trigger words for phishing detection
-const EMOTIONAL_TRIGGERS = [
-  // Urgency triggers
-  'urgent', 'immediately', 'act now', 'limited time', 'expires', 'deadline', 'today only',
-  // Fear triggers
-  'warning', 'alert', 'suspended', 'locked', 'blocked', 'compromised', 'unauthorized',
-  // Greed triggers
-  'free', 'discount', 'offer', 'prize', 'winner', 'congratulations', 'exclusive',
-  // Trust triggers
-  'verify', 'confirm', 'validate', 'secure', 'official', 'authentic', 'legitimate',
-  // Action triggers
-  'click here', 'download', 'update', 'upgrade', 'install', 'subscribe', 'register',
-  // Security triggers
-  'password', 'login', 'sign in', 'account', 'security', 'protect', 'secure',
-  // Social proof triggers
-  'popular', 'trending', 'viral', 'recommended', 'best-selling', 'top-rated'
-];
-
-function findEmotionalTriggers(text) {
-  if (!text) return [];
-  const found = [];
-  for (const word of EMOTIONAL_TRIGGERS) {
-    if (text.toLowerCase().includes(word)) found.push(word);
+function getElementPath(element) {
+  const path = [];
+  let current = element;
+  
+  while (current && current !== document.body) {
+    let selector = current.tagName.toLowerCase();
+    if (current.id) {
+      selector += `#${current.id}`;
+    } else if (current.className) {
+      selector += `.${current.className.split(' ').join('.')}`;
+    }
+    path.unshift(selector);
+    current = current.parentElement;
   }
-  return found;
+  
+  return path.join(' > ');
+}
+
+function getElementDescription(element) {
+  // Try to get text content
+  let text = element.textContent.trim();
+  if (text) {
+    // Limit text length and clean it up
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 50) {
+      text = text.substring(0, 47) + '...';
+    }
+    return text;
+  }
+
+  // Try to get aria-label
+  text = element.getAttribute('aria-label');
+  if (text) {
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 50) {
+      text = text.substring(0, 47) + '...';
+    }
+    return text;
+  }
+
+  // Try to get title
+  text = element.getAttribute('title');
+  if (text) {
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 50) {
+      text = text.substring(0, 47) + '...';
+    }
+    return text;
+  }
+
+  // Try to get alt text for images
+  if (element.tagName.toLowerCase() === 'img') {
+    text = element.getAttribute('alt');
+    if (text) {
+      text = text.replace(/\s+/g, ' ').trim();
+      if (text.length > 50) {
+        text = text.substring(0, 47) + '...';
+      }
+      return text;
+    }
+  }
+
+  // Try to get placeholder
+  text = element.getAttribute('placeholder');
+  if (text) {
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 50) {
+      text = text.substring(0, 47) + '...';
+    }
+    return text;
+  }
+
+  // Try to get value
+  text = element.value;
+  if (text) {
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text.length > 50) {
+      text = text.substring(0, 47) + '...';
+    }
+    return text;
+  }
+
+  return '';
+}
+
+function getElementType(element) {
+  const tag = element.tagName.toLowerCase();
+  const role = element.getAttribute('role');
+  const type = element.getAttribute('type');
+
+  if (tag === 'a') return 'Link';
+  if (tag === 'button') return 'Button';
+  if (tag === 'input') {
+    if (type === 'submit') return 'Submit button';
+    if (type === 'button') return 'Button';
+    return 'Input field';
+  }
+  if (tag === 'form') return 'Form';
+  if (role === 'button') return 'Button';
+  if (role === 'link') return 'Link';
+  return 'Clickable element';
 }
 
 function isValidLinkUrl(url) {
-  if (!url) return false;
   try {
     new URL(url);
     return true;
@@ -223,158 +389,101 @@ function isValidLinkUrl(url) {
   }
 }
 
-// Helper to scan for emotional triggers in text
-function findEmotionalTriggers(text) {
-  if (!text) return [];
-  const found = [];
-  for (const word of EMOTIONAL_TRIGGERS) {
-    if (text.toLowerCase().includes(word)) found.push(word);
-  }
-  return found;
-}
-
-// Helper to detect sender name/email mismatch (if present in DOM)
-function detectSenderMismatch() {
-  // Try to find sender name and email in the DOM (common patterns)
-  const senderNameEl = document.querySelector('[data-sender-name], .sender-name, .from .name, .fromName');
-  const senderEmailEl = document.querySelector('[data-sender-email], .sender-email, .from .email, .fromEmail');
-  let senderName = senderNameEl ? senderNameEl.textContent.trim() : '';
-  let senderEmail = senderEmailEl ? senderEmailEl.textContent.trim() : '';
-  // Try to extract from "Name <email>" pattern
-  if (!senderEmail && senderName) {
-    const match = senderName.match(/<([^>]+)>/);
-    if (match) {
-      senderEmail = match[1];
-      senderName = senderName.replace(/<[^>]+>/, '').trim();
-    }
-  }
-  if (senderName && senderEmail) {
-    const emailDomain = senderEmail.split('@')[1] || '';
-    if ((/nus|university|school|admin|it/i.test(senderName)) && !/nus\.edu\.sg$/i.test(emailDomain)) {
-      return { senderName, senderEmail, emailDomain, mismatch: true };
-    }
-  }
-  return null;
-}
-
-// Helper to detect external email banner
-function detectExternalEmailBanner() {
-  const banner = document.querySelector('.external-email, .external-banner, .external-warning, [data-external-email], .externalEmailBanner');
-  if (banner) {
-    return banner.textContent.trim();
-  }
-  // Look for generic external email warning
-  const text = document.body.textContent;
-  if (/external email/i.test(text)) {
-    return 'External Email banner detected';
-  }
-  return null;
-}
-
-// Add trusted domains for whitelisting
-const TRUSTED_DOMAINS = [
-  'nus.edu.sg',
-  'outlook.office.com',
-  'office.com',
-  'google.com',
-  'microsoft.com',
-  'luminus.nus.edu.sg',
-  'ivle.nus.edu.sg',
-  'nusmods.com',
-  'nus.edu.sg',
-  'nus.edu',
-  'nusmods.com',
-  'nusmods.sg'
-];
-
-// Helper to check if a URL is external
-function isExternalUrl(url) {
-  try {
-    const u = new URL(url);
-    return !TRUSTED_DOMAINS.some(domain => u.hostname.endsWith(domain));
-  } catch {
-    return false;
-  }
-}
-
-// Helper to check if a URL is valid and actionable
-function isValidLinkUrl(url) {
-  if (!url) return false;
+function getLinkStatus(url) {
   try {
     const urlObj = new URL(url);
-    // Allow http, https, mailto, and tel protocols
-    return ['http:', 'https:', 'mailto:', 'tel:'].includes(urlObj.protocol);
-  } catch (e) {
-    return false;
-  }
-}
+    const hostname = urlObj.hostname.toLowerCase();
+    
+    // Check if it's a trusted domain
+    if (TRUSTED_DOMAINS.some(domain => hostname.includes(domain))) {
+      return {
+        status: 'safe',
+        reason: 'Official NUS/Microsoft site'
+      };
+    }
+    
+    // Check if it's a NUS domain
+    if (NUS_WHITELIST.some(domain => hostname.includes(domain))) {
+      return {
+        status: 'safe',
+        reason: 'Official NUS site'
+      };
+    }
+    
+    // Check for suspicious TLDs
+    const suspiciousTLDs = ['.xyz', '.tk', '.pw', '.top'];
+    if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
+      return {
+        status: 'danger',
+        reason: 'Suspicious website - Known for phishing'
+      };
+    }
+    
+    // Check for HTTPS
+    if (urlObj.protocol !== 'https:') {
+      return {
+        status: 'warning',
+        reason: 'Not secure - Uses HTTP instead of HTTPS'
+      };
+    }
 
-// Gather red flags for the current page (improved)
-function gatherPhishingRedFlags() {
-  const redFlags = [];
-  // Emotional triggers in links/buttons (context-aware)
-  const linkEls = Array.from(document.querySelectorAll('a, button'));
-  for (const el of linkEls) {
-    let href = el.getAttribute('href') || '';
-    let triggers = findEmotionalTriggers(el.textContent);
-    if (triggers.length > 0) {
-      // Only flag if external or suspicious (not whitelisted)
-      if (isValidLinkUrl(href) && isExternalUrl(href)) {
-        redFlags.push({ type: 'emotional', text: el.textContent.trim(), triggers, url: href });
+    // Check for suspicious patterns in URL
+    const suspiciousPatterns = [
+      { pattern: /login|signin|sign-in|log-in/i, reason: 'Suspicious - Appears to be a login page' },
+      { pattern: /verify|validation|confirm/i, reason: 'Suspicious - Appears to be a verification page' },
+      { pattern: /account|profile|settings/i, reason: 'Suspicious - Appears to be an account page' },
+      { pattern: /secure|security|protect/i, reason: 'Suspicious - Uses security-related terms' },
+      { pattern: /bank|paypal|payment|money/i, reason: 'Suspicious - Financial-related terms' }
+    ];
+
+    for (const {pattern, reason} of suspiciousPatterns) {
+      if (pattern.test(urlObj.pathname) || pattern.test(urlObj.search)) {
+        return {
+          status: 'warning',
+          reason: reason
+        };
       }
     }
-  }
-  // Sender mismatch
-  const senderMismatch = detectSenderMismatch();
-  if (senderMismatch) {
-    redFlags.push({ type: 'sender-mismatch', ...senderMismatch });
-  }
-  // External email banner
-  const externalBanner = detectExternalEmailBanner();
-  if (externalBanner) {
-    redFlags.push({ type: 'external-banner', banner: externalBanner });
-  }
-  return redFlags;
-}
-
-let scanTimeout;
-const observer = new MutationObserver(() => {
-  clearTimeout(scanTimeout);
-  scanTimeout = setTimeout(() => {
-    if (document.readyState === 'complete') {
-      scanAllLinksAndSend();
-    }
-  }, 300);
-});
-observer.observe(document.body, {childList: true, subtree: true});
-// Initial scan
-if (document.readyState === 'complete') {
-  scanAllLinksAndSend();
-}
-
-// Update scanAllLinksAndSend to catch context errors
-function scanAllLinksAndSend() {
-  const links = scanAllLinks();
-  const redFlags = gatherPhishingRedFlags();
-  try {
-    chrome.runtime.sendMessage({action: 'analyzeLinks', links: links, redFlags: redFlags});
+    
+    return {
+      status: 'safe',
+      reason: 'Secure website'
+    };
   } catch (e) {
-    // Context invalidated, ignore
+    return {
+      status: 'invalid',
+      reason: 'Invalid link - Cannot be opened'
+    };
   }
 }
 
-// Function to check if a URL is suspicious
-function isSuspiciousUrl(url) {
-  // TODO: Implement URL checking logic
-  // This will be expanded to include:
-  // 1. Google Safe Browsing API check
-  // 2. NUS-specific domain validation
-  // 3. Pattern-based heuristic analysis
-  return false;
+function findEmotionalTriggers(text) {
+  if (!text) return [];
+  
+  const triggers = [];
+  const emotionalWords = [
+    'urgent action required',
+    'verify your account',
+    'unauthorized access',
+    'security breach',
+    'account suspended',
+    'password expired',
+    'click here to verify',
+    'limited time offer',
+    'your account will be deleted',
+    'immediate action required'
+  ];
+
+  const lowerText = text.toLowerCase();
+  emotionalWords.forEach(word => {
+    if (lowerText.includes(word)) {
+      triggers.push(word);
+    }
+  });
+
+  return triggers;
 }
 
-// Function to highlight suspicious links on the page
-function highlightSuspiciousLink(link) {
-  link.style.border = '2px solid red';
-  link.style.padding = '2px';
-} 
+// Auto-scan when the page loads
+console.log('Content script loaded');
+quickScanInteractiveElements(); 

@@ -3,15 +3,52 @@ chrome.runtime.onInstalled.addListener(function() {
   console.log('NUS Secure Access Tracker installed');
 });
 
-// --- Configurable security checks ---
-const ENABLE_SAFE_BROWSING = true; // Set to false to disable
-const ENABLE_NUS_LISTS = true; // Set to false to disable
-// TODO: Fill these with your actual data
+// Configuration
+const CONFIG = {
+  ENABLE_SAFE_BROWSING: true,
+  ENABLE_NUS_LISTS: true,
+  ENABLE_GENERIC_CHECKS: true,
+  ENABLE_EMOTIONAL_TRIGGERS: true,
+  ENABLE_URL_PATTERN_CHECKS: true,
+  DEBUG_MODE: true
+};
+
+// NUS-specific domains that are always safe
 const NUS_WHITELIST = [
-  // 'nus.edu.sg', ...
+  'nus.edu.sg',
+  'nusmods.com',
+  'ivle.nus.edu.sg',
+  'webmail.nus.edu.sg',
+  'outlook.office.com',
+  'office365.com',
+  'instructure.com',
+  'canvas.nus.edu.sg',
+  'luminus.nus.edu.sg'
 ];
-const NUS_BLACKLIST = [
-  // 'phishingsite.com', ...
+
+// Trusted domains that should not trigger warnings
+const TRUSTED_DOMAINS = [
+  'microsoft.com',
+  'office.com',
+  'outlook.com',
+  'live.com',
+  'sharepoint.com',
+  'onedrive.com',
+  'teams.microsoft.com',
+  'portal.office.com',
+  'login.microsoftonline.com',
+  'outlook.office365.com',
+  'outlook.office.com',
+  'mail.office365.com',
+  'mail.office.com',
+  'owa.nus.edu.sg',
+  'webmail.nus.edu.sg',
+  'canvas.nus.edu.sg',
+  'instructure.com',
+  'nus.edu.sg',
+  'nusmods.com',
+  'ivle.nus.edu.sg',
+  'luminus.nus.edu.sg'
 ];
 
 // Google Safe Browsing API key
@@ -57,35 +94,23 @@ async function checkUrlWithSafeBrowsing(url) {
   }
 }
 
-// NUS-specific domain validation stub
-function validateNusDomain(url) {
-  // TODO: Implement actual logic using NUS_WHITELIST and NUS_BLACKLIST
-  return { isNusDomain: false, isSuspicious: false };
-}
-
-// Crowdsourced reporting stub
-async function reportSuspiciousLink(url) {
-  // TODO: Implement actual reporting to your backend (e.g., Firebase)
-  console.log('Reporting suspicious link:', url);
-}
-
-// Background script for automated link scanning
-
 // Store last scan time per tab to throttle scans
 const lastScanTime = {};
-const SCAN_THROTTLE_MS = 5000; // Minimum 5 seconds between scans per tab
+const SCAN_THROTTLE_MS = 2000; // 2 seconds between scans
 
-// Listen for tab updates (page load, navigation)
+// Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.active && /^https?:/.test(tab.url)) {
+    console.log('Tab updated:', tab.url);
     triggerScan(tabId, tab.url);
   }
 });
 
-// Listen for tab activation (user switches tabs)
+// Listen for tab activation
 chrome.tabs.onActivated.addListener(activeInfo => {
   chrome.tabs.get(activeInfo.tabId, tab => {
     if (tab && /^https?:/.test(tab.url)) {
+      console.log('Tab activated:', tab.url);
       triggerScan(tab.id, tab.url);
     }
   });
@@ -94,108 +119,149 @@ chrome.tabs.onActivated.addListener(activeInfo => {
 function triggerScan(tabId, url) {
   const now = Date.now();
   if (lastScanTime[tabId] && now - lastScanTime[tabId] < SCAN_THROTTLE_MS) {
-    return; // Throttle
+    console.log('Skipping scan due to throttle:', tabId);
+    return;
   }
   lastScanTime[tabId] = now;
+
+  console.log('Triggering scan for tab:', tabId, 'URL:', url);
+
   // Try to send message to content script
   chrome.tabs.sendMessage(tabId, {action: "scanLinks"}, response => {
     if (chrome.runtime.lastError || !response) {
+      console.log('Content script not found, injecting...');
       // If failed, try to inject the content script and retry
       chrome.scripting.executeScript({
         target: {tabId: tabId, allFrames: true},
         files: ["content.js"]
       }, () => {
-        // Retry sending the scan message
-        chrome.tabs.sendMessage(tabId, {action: "scanLinks"}, response2 => {
-          if (chrome.runtime.lastError || !response2) return;
-          chrome.storage.local.set({['scanResults_' + tabId]: response2.links});
-          const hasDanger = response2.links.some(l => l.status === 'danger');
-          chrome.action.setBadgeText({tabId, text: hasDanger ? '!' : ''});
-          chrome.action.setBadgeBackgroundColor({tabId, color: hasDanger ? '#F44336' : '#4CAF50'});
-        });
+        // Retry sending the scan message after a short delay
+        setTimeout(() => {
+          chrome.tabs.sendMessage(tabId, {action: "scanLinks"}, response2 => {
+            if (chrome.runtime.lastError || !response2) {
+              console.log('Failed to get response after injection');
+              return;
+            }
+            console.log('Scan results after injection:', response2.elements);
+            processScanResults(response2.elements, tabId);
+          });
+        }, 100);
       });
       return;
     }
-    // Store results in chrome.storage (per tab)
-    chrome.storage.local.set({['scanResults_' + tabId]: response.links});
-    // Optionally, show a badge or notification if suspicious links found
-    const hasDanger = response.links.some(l => l.status === 'danger');
-    chrome.action.setBadgeText({tabId, text: hasDanger ? '!' : ''});
-    chrome.action.setBadgeBackgroundColor({tabId, color: hasDanger ? '#F44336' : '#4CAF50'});
+    console.log('Scan results:', response.elements);
+    processScanResults(response.elements, tabId);
   });
 }
 
-// Listen for autoScanResults from content script
+// Helper function to process scan results
+function processScanResults(elements, tabId) {
+  // Store results in chrome.storage (per tab)
+  chrome.storage.local.set({['scanResults_' + tabId]: elements});
+  
+  // Check for dangerous elements
+  const hasDanger = elements.some(e => e.status === 'danger');
+  const hasWarning = elements.some(e => e.status === 'warning');
+  
+  console.log('Processing scan results:', {
+    tabId,
+    elementCount: elements.length,
+    hasDanger,
+    hasWarning
+  });
+  
+  // Update badge
+  if (hasDanger) {
+    chrome.action.setBadgeText({tabId, text: '!'});
+    chrome.action.setBadgeBackgroundColor({tabId, color: '#F44336'});
+  } else if (hasWarning) {
+    chrome.action.setBadgeText({tabId, text: '!'});
+    chrome.action.setBadgeBackgroundColor({tabId, color: '#FFA000'});
+  } else {
+    chrome.action.setBadgeText({tabId, text: ''});
+  }
+}
+
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'autoScanResults' && sender.tab && sender.tab.id) {
     const tabId = sender.tab.id;
-    chrome.storage.local.set({['scanResults_' + tabId]: message.links});
-    const hasDanger = message.links.some(l => l.status === 'danger');
-    chrome.action.setBadgeText({tabId, text: hasDanger ? '!' : ''});
-    chrome.action.setBadgeBackgroundColor({tabId, color: hasDanger ? '#F44336' : '#4CAF50'});
+    console.log('Received auto scan results:', message.elements);
+    processScanResults(message.elements, tabId);
   }
 });
 
 // Listen for analyzeLinks from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'analyzeLinks' && sender.tab && sender.tab.id) {
-    analyzeLinks(message.links, sender.tab.id, sender.frameId, message.redFlags);
+    console.log('Analyzing elements:', message.elements);
+    analyzeElements(message.elements, sender.tab.id, sender.frameId, message.redFlags);
   }
 });
 
-async function analyzeLinks(links, tabId, frameId, redFlags) {
-  const analyzedLinks = [];
-  for (const link of links) {
+async function analyzeElements(elements, tabId, frameId, redFlags) {
+  const analyzedElements = [];
+  for (const element of elements) {
     let status = 'safe';
     let reason = '';
     try {
-      const urlObj = new URL(link.url);
-      const hostname = urlObj.hostname;
-      // 1. NUS whitelist/blacklist
-      if (ENABLE_NUS_LISTS) {
-        if (NUS_WHITELIST.some(domain => hostname.endsWith(domain))) {
+      if (element.url) {
+        const urlObj = new URL(element.url);
+        const hostname = urlObj.hostname.toLowerCase();
+        
+        // Check if it's a trusted domain first
+        if (TRUSTED_DOMAINS.some(domain => hostname.includes(domain))) {
           status = 'safe';
-          reason = 'NUS Whitelist';
+          reason = 'Trusted domain';
+          analyzedElements.push({...element, status, reason});
+          continue;
         }
-        if (NUS_BLACKLIST.some(domain => hostname.endsWith(domain))) {
-          status = 'danger';
-          reason = 'NUS Blacklist';
+
+        // 1. NUS whitelist/blacklist
+        if (CONFIG.ENABLE_NUS_LISTS) {
+          if (NUS_WHITELIST.some(domain => hostname.includes(domain))) {
+            status = 'safe';
+            reason = 'NUS Whitelist';
+            analyzedElements.push({...element, status, reason});
+            continue;
+          }
         }
-      }
-      // 2. Google Safe Browsing API
-      if (status === 'safe' && ENABLE_SAFE_BROWSING) {
-        const safeBrowsingResult = await checkUrlWithSafeBrowsing(link.url);
-        console.log('Safe Browsing API result for', link.url, safeBrowsingResult);
-        if (!safeBrowsingResult.safe) {
-          status = 'danger';
-          reason = `Google Safe Browsing: ${safeBrowsingResult.threatType}`;
+
+        // 2. Google Safe Browsing API
+        if (status === 'safe' && CONFIG.ENABLE_SAFE_BROWSING) {
+          const safeBrowsingResult = await checkUrlWithSafeBrowsing(element.url);
+          console.log('Safe Browsing API result for', element.url, safeBrowsingResult);
+          if (!safeBrowsingResult.safe) {
+            status = 'danger';
+            reason = `Google Safe Browsing: ${safeBrowsingResult.threatType}`;
+          }
         }
-      }
-      // 3. Heuristics
-      if (status === 'safe') {
-        if (hostname.includes('nus') && !hostname.endsWith('nus.edu.sg')) {
-          status = 'warning';
-          reason = 'Contains "nus" but not nus.edu.sg';
+
+        // 3. Heuristics
+        if (status === 'safe') {
+          if (hostname.includes('nus') && !hostname.endsWith('nus.edu.sg')) {
+            status = 'warning';
+            reason = 'Suspicious NUS domain';
+          }
+          if (['.xyz', '.tk', '.pw', '.top'].some(tld => hostname.endsWith(tld))) {
+            status = 'danger';
+            reason = 'Suspicious TLD';
+          }
         }
-        const suspiciousTLDs = ['.xyz', '.tk', '.ml', '.ga', '.cf'];
-        if (suspiciousTLDs.some(tld => hostname.endsWith(tld))) {
-          status = 'danger';
-          reason = 'Suspicious TLD';
-        }
-        const phishingKeywords = ['login', 'signin', 'account', 'verify', 'secure', 'bank', 'paypal'];
-        if (phishingKeywords.some(keyword => hostname.includes(keyword))) {
-          status = 'warning';
-          reason = `Contains keyword: ${keyword}`;
-        }
+      } else if (element.triggers && element.triggers.length > 0) {
+        status = 'warning';
+        reason = `Contains emotional triggers: ${element.triggers.join(', ')}`;
       }
     } catch (e) {
       status = 'invalid';
       reason = 'Invalid URL';
     }
-    analyzedLinks.push({...link, status, reason});
+    analyzedElements.push({...element, status, reason});
   }
+  
+  console.log('Analysis complete:', analyzedElements);
   // Store results and red flags, notify content script
-  chrome.storage.local.set({['scanResults_' + tabId]: analyzedLinks, ['redFlags_' + tabId]: redFlags || []});
+  chrome.storage.local.set({['scanResults_' + tabId]: analyzedElements, ['redFlags_' + tabId]: redFlags || []});
 }
 
 // --- How to verify that google's API is working(Still doesn't work as intended though), API not invoked, can't see in action ---
