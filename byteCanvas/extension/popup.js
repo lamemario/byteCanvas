@@ -6,64 +6,125 @@ document.addEventListener('DOMContentLoaded', function() {
   const results = document.getElementById('results');
   const tips = document.getElementById('tips');
   const linkCount = document.getElementById('linkCount');
+  let currentTabId = null;
 
-  // Load tips
-  loadTips();
+  // --- Main function to refresh all UI elements from storage ---
+  function refreshUi() {
+    if (!currentTabId) return;
 
-  // Load scan results and red flags from storage for this tab
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    const tabId = tabs[0].id;
-    chrome.storage.local.get(['scanResults_' + tabId, 'redFlags_' + tabId], function(data) {
-      const links = data['scanResults_' + tabId] || [];
-      const redFlags = data['redFlags_' + tabId] || [];
+    const storageKeys = [
+      'scanState_' + currentTabId,
+      'scanResults_' + currentTabId,
+      'redFlags_' + currentTabId,
+      'deceptiveUrl_' + currentTabId
+    ];
+
+    chrome.storage.local.get(storageKeys, function(data) {
+      if (chrome.runtime.lastError) {
+        console.error("Error fetching data from storage:", chrome.runtime.lastError);
+        return;
+      }
+      
+      const scanState = data['scanState_' + currentTabId];
+      const links = data['scanResults_' + currentTabId] || [];
+      let redFlags = data['redFlags_' + currentTabId] || [];
+      const deceptiveUrlInfo = data['deceptiveUrl_' + currentTabId];
+
+      // If a deceptive URL was detected, add it as a high-priority red flag
+      if (deceptiveUrlInfo && deceptiveUrlInfo.isDeceptive) {
+        // Avoid adding duplicates
+        if (!redFlags.some(flag => flag.type === 'deceptive-url')) {
+          redFlags.unshift({
+            type: 'deceptive-url',
+            realHost: deceptiveUrlInfo.realHost,
+            fakeHost: deceptiveUrlInfo.fakeHost
+          });
+        }
+      }
+
       displayRedFlags(redFlags);
       displayResults(links);
       linkCount.textContent = `${links.length} links`;
-    });
-  });
 
-  // Listen for storage changes and auto-refresh scan results
-  chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-    const tabId = tabs[0].id;
-    chrome.storage.onChanged.addListener(function(changes, area) {
-      if (area === 'local' && changes['scanResults_' + tabId]) {
-        const links = changes['scanResults_' + tabId].newValue || [];
-        displayResults(links);
-        linkCount.textContent = `${links.length} links`;
+      // Update UI based on the specific scan state
+      if (scanState === 'scanning') {
+        scanButton.disabled = true;
+        scanButton.innerHTML = '<span class="material-icons rotating">sync</span> Scanning...';
+        scanStatus.textContent = 'Scan in progress...';
+        scanStatus.style.backgroundColor = 'var(--surface-color)';
+        scanStatus.style.color = 'var(--text-color)';
+        results.innerHTML = `<div class="empty-state"><div class="spinner"></div><p>Analyzing links...</p></div>`;
+      } else if (scanState === 'complete') {
+        scanButton.disabled = false;
+        scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
         scanStatus.textContent = 'Scan complete!';
         scanStatus.style.backgroundColor = 'var(--success-color)';
         scanStatus.style.color = 'white';
+        if (links.length === 0) {
+            results.innerHTML = `<div class="empty-state"><span class="material-icons">search</span><p>No scannable links found on this page.</p></div>`;
+        }
+      } else {
+        // Default state if no scan has happened
+        scanButton.disabled = false;
+        scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
+        scanStatus.textContent = 'Ready to scan.';
+        scanStatus.style.backgroundColor = 'var(--surface-color)';
+        scanStatus.style.color = 'var(--text-color)';
+        results.innerHTML = `<div class="empty-state"><span class="material-icons">shield</span><p>Click "Scan This Page" to check for threats.</p></div>`;
+      }
+    });
+  }
+
+  // Initial setup: Get current tab and set up listeners
+  chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
+    if (!tabs || tabs.length === 0) {
+      scanStatus.textContent = 'Error: No active tab found.';
+      return;
+    }
+    currentTabId = tabs[0].id;
+
+    // Initial paint of the UI with data from storage
+    refreshUi();
+
+    // --- Listen for storage changes to auto-refresh UI ---
+    chrome.storage.onChanged.addListener(function(changes, namespace) {
+      if (namespace === 'local') {
+        const stateKey = 'scanState_' + currentTabId;
+        // If the state for our current tab has changed, refresh the UI
+        if (changes[stateKey]) {
+          console.log('Scan state changed, refreshing UI for tab', currentTabId);
+          refreshUi();
+        }
       }
     });
   });
 
+  // Load tips
+  loadTips();
+
   // Scan button click handler (manual scan)
   scanButton.addEventListener('click', function() {
+    if (!currentTabId) return;
+    
     scanButton.disabled = true;
     scanButton.innerHTML = '<span class="material-icons rotating">sync</span> Scanning...';
     scanStatus.textContent = 'Scanning page for suspicious links...';
     scanStatus.style.backgroundColor = 'var(--surface-color)';
-    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-      chrome.tabs.sendMessage(tabs[0].id, {action: "scanLinks"}, function(response) {
-        if (chrome.runtime.lastError) {
-          scanStatus.textContent = 'Error: Could not scan page. Please refresh and try again.';
-          scanStatus.style.backgroundColor = 'var(--error-color)';
-          scanStatus.style.color = 'white';
-        } else if (response && response.links) {
-          displayResults(response.links);
-          linkCount.textContent = `${response.links.length} links`;
-          scanStatus.textContent = 'Scan complete!';
-          scanStatus.style.backgroundColor = 'var(--success-color)';
-          scanStatus.style.color = 'white';
-          // Save results for background sync
-          chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
-            const tabId = tabs[0].id;
-            chrome.storage.local.set({['scanResults_' + tabId]: response.links});
-          });
-        }
+    scanStatus.style.color = 'var(--text-color)';
+
+    // 1. Send the message to start the scan in the background.
+    chrome.tabs.sendMessage(currentTabId, { action: "scanLinks" }, function(response) {
+      if (chrome.runtime.lastError) {
+        scanStatus.textContent = 'Error: Could not scan page. Refresh and try again.';
+        scanStatus.style.backgroundColor = 'var(--error-color)';
+        scanStatus.style.color = 'white';
         scanButton.disabled = false;
         scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
-      });
+        return;
+      }
+      // The UI will now update automatically via the storage listener.
+      // We can immediately update the UI to a "scanning" state for responsiveness.
+      refreshUi();
     });
   });
 
@@ -95,13 +156,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function displayResults(links) {
   const results = document.getElementById('results');
-  if (links.length === 0) {
-    results.innerHTML = `
-      <div class="empty-state">
-        <span class="material-icons">search</span>
-        <p>No links found on this page</p>
-      </div>
-    `;
+  // The refreshUi function now handles all empty/in-progress states.
+  // This function should only render results if they exist.
+  if (!links || links.length === 0) {
+    // Let refreshUi handle the empty state message.
     return;
   }
   let html = '<ul class="link-list">';
@@ -276,7 +334,15 @@ function displayRedFlags(redFlags) {
   } else {
     html += `<ul class="red-flags-list">`;
     redFlags.forEach(flag => {
-      if (flag.type === 'emotional') {
+      if (flag.type === 'deceptive-url') {
+        html += `<div class="red-flag red-flag-deceptive">
+          <span class="material-icons">report</span>
+          <div class="red-flag-content">
+            <div class="red-flag-title">Deceptive URL Detected!</div>
+            <div class="red-flag-explanation">This page's address is designed to trick you. You are on <strong>${flag.realHost}</strong>, not ${flag.fakeHost}.</div>
+          </div>
+        </div>`;
+      } else if (flag.type === 'emotional') {
         html += `<div class="red-flag red-flag-emotional">
           <span class="material-icons">priority_high</span>
           <div class="red-flag-content">
