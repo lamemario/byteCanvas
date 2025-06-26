@@ -21,7 +21,8 @@
     "*://*.instructure.com/*",
     "*://*.canvas.nus.edu.sg/*",
     "*://canvas.nus.edu.sg/*",
-    "*://*.luminus.nus.edu.sg/*"
+    "*://*.luminus.nus.edu.sg/*",
+    "*://testsafebrowsing.appspot.com/s/phishing.html"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -54,7 +55,8 @@
         "*://*.instructure.com/*",
         "*://*.canvas.nus.edu.sg/*",
         "*://canvas.nus.edu.sg/*",
-        "*://*.luminus.nus.edu.sg/*"
+        "*://*.luminus.nus.edu.sg/*",
+        "*://testsafebrowsing.appspot.com/s/phishing.html"
       ],
       "js": ["content.js"],
       "run_at": "document_idle",

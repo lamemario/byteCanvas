@@ -1,3 +1,5 @@
+console.log('NUS Secure Access Tracker service worker loaded');
+
 // Listen for installation
 chrome.runtime.onInstalled.addListener(function() {
   console.log('NUS Secure Access Tracker installed');
@@ -53,6 +55,34 @@ const TRUSTED_DOMAINS = [
 
 // Google Safe Browsing API key
 const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
+
+// In-memory cache for Safe Browsing results
+const safeBrowsingCache = {};
+let rateLimitHit = false; // Global flag for rate limiting
+
+// Sleep utility for throttling
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Persistent cache using chrome.storage.local
+async function getPersistentCache(url) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
+      const cache = result.safeBrowsingCache || {};
+      resolve(cache[url]);
+    });
+  });
+}
+async function setPersistentCache(url, value) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
+      const cache = result.safeBrowsingCache || {};
+      cache[url] = value;
+      chrome.storage.local.set({safeBrowsingCache: cache}, resolve);
+    });
+  });
+}
 
 // Google Safe Browsing API real implementation
 async function checkUrlWithSafeBrowsing(url) {
@@ -143,14 +173,14 @@ function triggerScan(tabId, url) {
               return;
             }
             console.log('Scan results after injection:', response2.elements);
-            processScanResults(response2.elements, tabId);
+            analyzeElements(response2.elements, tabId, 0, []);
           });
         }, 100);
       });
       return;
     }
     console.log('Scan results:', response.elements);
-    processScanResults(response.elements, tabId);
+    analyzeElements(response.elements, tabId, 0, []);
   });
 }
 
@@ -199,76 +229,151 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+async function checkUrlWithSafeBrowsingCached(url) {
+  // 1. Persistent cache
+  const persistent = await getPersistentCache(url);
+  if (persistent) {
+    safeBrowsingCache[url] = persistent;
+    return persistent;
+  }
+  // 2. In-memory cache
+  if (safeBrowsingCache[url]) {
+    return safeBrowsingCache[url];
+  }
+  // 3. Throttle and API call
+  await sleep(300); // 300ms delay between requests
+  if (rateLimitHit) {
+    return { safe: true, threatType: null, error: 'rate_limited' };
+  }
+  try {
+    const result = await checkUrlWithSafeBrowsing(url);
+    safeBrowsingCache[url] = result;
+    await setPersistentCache(url, result);
+    return result;
+  } catch (e) {
+    if (e && e.message && e.message.includes('429')) {
+      rateLimitHit = true;
+      return { safe: true, threatType: null, error: 'rate_limited' };
+    }
+    throw e;
+  }
+}
+
 async function analyzeElements(elements, tabId, frameId, redFlags) {
+  rateLimitHit = false; // Reset for each scan
+  console.log('analyzeElements called', {tabId, frameId, elementCount: elements.length, elements});
   const analyzedElements = [];
+  const phishingKeywords = ['login', 'signin', 'account', 'verify', 'secure', 'update', 'password', 'bank', 'paypal'];
+  const suspiciousTLDs = ['.xyz', '.tk', '.pw', '.top', '.ml', '.ga', '.cf', '.zip', '.mov'];
   for (const element of elements) {
     let status = 'safe';
-    let reason = '';
+    let reasons = [];
+    let mostSevere = 'safe';
     try {
-      if (element.url) {
-        const urlObj = new URL(element.url);
-        const hostname = urlObj.hostname.toLowerCase();
-        
-        // Check if it's a trusted domain first
-        if (TRUSTED_DOMAINS.some(domain => hostname.includes(domain))) {
-          status = 'safe';
-          reason = 'Trusted domain';
-          analyzedElements.push({...element, status, reason});
-          continue;
+      if (!element.url) {
+        status = 'invalid';
+        reasons.push('No URL found');
+        mostSevere = 'invalid';
+      } else {
+        let urlObj;
+        let hostname = '';
+        try {
+          urlObj = new URL(element.url);
+          hostname = urlObj.hostname.toLowerCase();
+        } catch (e) {
+          status = 'invalid';
+          reasons.push('Invalid URL format');
+          mostSevere = 'invalid';
         }
-
-        // 1. NUS whitelist/blacklist
-        if (CONFIG.ENABLE_NUS_LISTS) {
-          if (NUS_WHITELIST.some(domain => hostname.includes(domain))) {
-            status = 'safe';
-            reason = 'NUS Whitelist';
-            analyzedElements.push({...element, status, reason});
-            continue;
+        if (hostname) {
+          // Trusted/whitelist
+          const isTrusted = TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain));
+          console.log('[CHECK] Trusted domain:', element.url, isTrusted);
+          if (isTrusted) {
+            reasons.push('Trusted domain');
           }
-        }
-
-        // 2. Google Safe Browsing API
-        if (status === 'safe' && CONFIG.ENABLE_SAFE_BROWSING) {
-          const safeBrowsingResult = await checkUrlWithSafeBrowsing(element.url);
-          console.log('Safe Browsing API result for', element.url, safeBrowsingResult);
-          if (!safeBrowsingResult.safe) {
+          // NUS whitelist
+          const isNusWhite = CONFIG.ENABLE_NUS_LISTS && NUS_WHITELIST.some(domain => hostname.endsWith(domain));
+          console.log('[CHECK] NUS Whitelist:', element.url, isNusWhite);
+          if (isNusWhite) {
+            reasons.push('NUS Whitelist');
+          }
+          // Blacklist
+          const isBlacklisted = typeof NUS_BLACKLIST !== 'undefined' && NUS_BLACKLIST.some(domain => hostname.endsWith(domain));
+          console.log('[CHECK] Blacklist:', element.url, isBlacklisted);
+          if (isBlacklisted) {
             status = 'danger';
-            reason = `Google Safe Browsing: ${safeBrowsingResult.threatType}`;
+            reasons.push('Blacklisted domain');
+            mostSevere = 'danger';
           }
-        }
-
-        // 3. Heuristics
-        if (status === 'safe') {
-          if (hostname.includes('nus') && !hostname.endsWith('nus.edu.sg')) {
-            status = 'warning';
-            reason = 'Suspicious NUS domain';
-          }
-          if (['.xyz', '.tk', '.pw', '.top'].some(tld => hostname.endsWith(tld))) {
+          // @ symbol deception
+          const hasAtSymbol = hostname.includes('@');
+          console.log('[CHECK] @ symbol:', element.url, hasAtSymbol);
+          if (hasAtSymbol) {
             status = 'danger';
-            reason = 'Suspicious TLD';
+            reasons.push('Deceptive URL: @ symbol in hostname (phishing trick)');
+            mostSevere = 'danger';
+          }
+          // Typosquatting
+          const isTyposquat = hostname.includes('nus') && !TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain));
+          console.log('[CHECK] Typosquatting:', element.url, isTyposquat);
+          if (isTyposquat) {
+            if (mostSevere !== 'danger') mostSevere = 'warning';
+            reasons.push('Contains "nus" but not on a trusted NUS domain');
+          }
+          // Suspicious TLDs
+          const isSuspiciousTLD = suspiciousTLDs.some(tld => hostname.endsWith(tld));
+          console.log('[CHECK] Suspicious TLD:', element.url, isSuspiciousTLD);
+          if (isSuspiciousTLD) {
+            status = 'danger';
+            reasons.push('Suspicious TLD');
+            mostSevere = 'danger';
+          }
+          // Phishing keyword check
+          const keywordFound = phishingKeywords.find(keyword => hostname.includes(keyword) || element.url.toLowerCase().includes(keyword));
+          console.log('[CHECK] Phishing keyword:', element.url, keywordFound);
+          if (keywordFound && !TRUSTED_DOMAINS.some(domain => hostname.endsWith(domain))) {
+            if (mostSevere !== 'danger') mostSevere = 'warning';
+            reasons.push(`Contains phishing keyword: "${keywordFound}" on a non-trusted domain`);
+          }
+          // Safe Browsing (after local checks)
+          if (CONFIG.ENABLE_SAFE_BROWSING && !isTrusted && !isBlacklisted && !rateLimitHit) {
+            const safeBrowsingResult = await checkUrlWithSafeBrowsingCached(element.url);
+            console.log('[CHECK] Safe Browsing:', element.url, safeBrowsingResult);
+            if (safeBrowsingResult.error === 'rate_limited') {
+              reasons.push('Google Safe Browsing: rate limited, not checked');
+            } else if (!safeBrowsingResult.safe) {
+              status = 'danger';
+              reasons.push(`Google Safe Browsing: ${safeBrowsingResult.threatType}`);
+              mostSevere = 'danger';
+            }
           }
         }
-      } else if (element.triggers && element.triggers.length > 0) {
-        status = 'warning';
-        reason = `Contains emotional triggers: ${element.triggers.join(', ')}`;
       }
     } catch (e) {
       status = 'invalid';
-      reason = 'Invalid URL';
+      reasons.push('Error during analysis');
+      mostSevere = 'invalid';
     }
+    // Set final status to most severe
+    if (mostSevere === 'danger') status = 'danger';
+    else if (mostSevere === 'warning') status = 'warning';
+    else if (mostSevere === 'invalid') status = 'invalid';
+    else status = 'safe';
+    const reason = reasons.join('; ');
     analyzedElements.push({...element, status, reason});
   }
-  
-  console.log('Analysis complete:', analyzedElements);
-  // Store results and red flags, notify content script
-  chrome.storage.local.set({['scanResults_' + tabId]: analyzedElements, ['redFlags_' + tabId]: redFlags || []});
-}
 
-// --- How to verify that google's API is working(Still doesn't work as intended though), API not invoked, can't see in action ---
-// 1. Open the extension and scan a page with a known malicious or phishing URL (e.g., https://testsafebrowsing.appspot.com/).
-// 2. If the link is flagged as dangerous, the API is working.
-// 3. You can also check the console for 'Safe Browsing API result for ...' logs.
-//
-// --- How the user is warned ---
-// If a link is found dangerous by the API, it will be marked as 'danger' in the scan results.
-// The extension will show a red badge (!) on the extension icon and highlight the link as dangerous in the UI. 
+  chrome.storage.local.set({['scanResults_' + tabId]: analyzedElements, ['rateLimitHit_' + tabId]: rateLimitHit});
+  const hasDanger = analyzedElements.some(e => e.status === 'danger');
+  const hasWarning = analyzedElements.some(e => e.status === 'warning');
+  if (hasDanger) {
+    chrome.action.setBadgeText({tabId, text: '!' });
+    chrome.action.setBadgeBackgroundColor({tabId, color: '#F44336'});
+  } else if (hasWarning) {
+    chrome.action.setBadgeText({tabId, text: '!' });
+    chrome.action.setBadgeBackgroundColor({tabId, color: '#FFA000'});
+  } else {
+    chrome.action.setBadgeText({tabId, text: ''});
+  }
+}
