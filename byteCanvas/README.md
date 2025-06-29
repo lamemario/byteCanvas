@@ -21,8 +21,6 @@ ByteCanvas is a Chrome/Firefox extension that provides real-time protection agai
 - Database: Firebase
 - Performance: C++ WebAssembly
 
-## Getting Started
-
 ### Prerequisites
 
 - Node.js
@@ -30,31 +28,11 @@ ByteCanvas is a Chrome/Firefox extension that provides real-time protection agai
 - Chrome/Firefox browser
 - Git
 
-### Agreed Dependencies, Installations between Matthias and Mehdi
-
-1. Clone the repository:
-```bash
-git clone https://github.com/lamemario/byteCanvas.git
-cd byteCanvas
-```
-
-2. Install dependencies:
-```bash
-# Frontend dependencies
-cd extension
-npm install
-
-# Backend dependencies
-cd ../backend
-pip install -r requirements.txt
-```
-
-3. Load the extension in Chrome:
+Load the extension in Chrome:
    - Open Chrome and go to `chrome://extensions/`
    - Enable "Developer mode"
    - Click "Load unpacked" and select the `extension` folder
 
-## Development
 
 ### Project Structure
 
@@ -65,32 +43,12 @@ byteCanvas/
 └── resources/        # Additional resources
 ```
 
-### Intended github workflow for matthias and mehdi
-
-1. Create a new branch for your feature:
-```bash
-git checkout -b feature/your-feature-name
-```
-
-2. Make your changes and commit them:
-```bash
-git add .
-git commit -m "Description of changes"
-```
-
-3. Push to your branch:
-```bash
-git push origin feature/your-feature-name
-```
-
-4. Create a Pull Request on GitHub
-
 ## Team Members
 
 - Matthias (Computer Engineering)
 - Sayyid (Information Security)
 
-## Setup & Testing Instructions
+## Setup & Testing Instructions for Developers
 
 ### 1. Load the Extension in Chrome
 1. Open Google Chrome.

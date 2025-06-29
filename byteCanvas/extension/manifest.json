@@ -1,17 +1,28 @@
 {
   "manifest_version": 3,
-  "name": "NUS Secure Access Tracker",
-  "version": "1.0.0",
-  "description": "A browser extension that protects NUS students from phishing attacks",
+  "name": "NUS Secure Access",
+  "version": "1.0",
+  "description": "Security extension for NUS students",
   "permissions": [
-    "activeTab",
     "storage",
-    "tabs",
+    "activeTab",
     "scripting",
-    "webNavigation"
+    "tabs",
+    "webNavigation",
+    "webRequest"
   ],
   "host_permissions": [
-    "<all_urls>"
+    "*://*.nus.edu.sg/*",
+    "*://*.nusmods.com/*",
+    "*://*.ivle.nus.edu.sg/*",
+    "*://*.webmail.nus.edu.sg/*",
+    "*://*.outlook.office.com/*",
+    "*://*.office365.com/*",
+    "*://*.instructure.com/*",
+    "*://*.canvas.nus.edu.sg/*",
+    "*://canvas.nus.edu.sg/*",
+    "*://*.luminus.nus.edu.sg/*",
+    "*://testsafebrowsing.appspot.com/s/phishing.html"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -28,21 +39,32 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "icons/*",
-        "popup.css"
-      ],
+      "resources": ["icons/*"],
       "matches": ["<all_urls>"]
     }
   ],
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
+      "matches": [
+        "*://*.nus.edu.sg/*",
+        "*://*.nusmods.com/*",
+        "*://*.ivle.nus.edu.sg/*",
+        "*://*.webmail.nus.edu.sg/*",
+        "*://*.outlook.office.com/*",
+        "*://*.office365.com/*",
+        "*://*.instructure.com/*",
+        "*://*.canvas.nus.edu.sg/*",
+        "*://canvas.nus.edu.sg/*",
+        "*://*.luminus.nus.edu.sg/*",
+        "*://testsafebrowsing.appspot.com/s/phishing.html"
+      ],
       "js": ["content.js"],
+      "run_at": "document_idle",
       "all_frames": true
     }
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   }
 } 

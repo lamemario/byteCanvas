@@ -39,13 +39,20 @@ chrome.webNavigation.onBeforeNavigate.addListener(details => {
 
 // --- Configurable security checks ---
 const ENABLE_SAFE_BROWSING = true; // Set to false to disable
-const ENABLE_NUS_LISTS = false; // Set to false to disable
+const ENABLE_NUS_LISTS = false; // Set to false to disable since actual true lists are not available
 // TODO: Fill these with lists from NUS IT Security
+
+// NUS-specific domains that are always safe
 const NUS_WHITELIST = [
-  // 'nus.edu.sg', ...
-];
-const NUS_BLACKLIST = [
-  // 'phishingsite.com', ...
+  'nus.edu.sg',
+  'nusmods.com',
+  'ivle.nus.edu.sg',
+  'webmail.nus.edu.sg',
+  'outlook.office.com',
+  'office365.com',
+  'instructure.com',
+  'canvas.nus.edu.sg',
+  'luminus.nus.edu.sg'
 ];
 
 // Based on research of official and affiliated NUS domains.
@@ -66,6 +73,34 @@ const TRUSTED_DOMAINS = [
 
 // Google Safe Browsing API key
 const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
+
+// In-memory cache for Safe Browsing results
+const safeBrowsingCache = {};
+let rateLimitHit = false; // Global flag for rate limiting
+
+// Sleep utility for throttling
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Persistent cache using chrome.storage.local
+async function getPersistentCache(url) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
+      const cache = result.safeBrowsingCache || {};
+      resolve(cache[url]);
+    });
+  });
+}
+async function setPersistentCache(url, value) {
+  return new Promise(resolve => {
+    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
+      const cache = result.safeBrowsingCache || {};
+      cache[url] = value;
+      chrome.storage.local.set({safeBrowsingCache: cache}, resolve);
+    });
+  });
+}
 
 // Google Safe Browsing API real implementation
 async function checkUrlWithSafeBrowsing(url) {
@@ -124,7 +159,6 @@ async function reportSuspiciousLink(url) {
   console.log('Reporting suspicious link:', url);
 }
 
-// The only listener we need is for the content script to send us links to analyze.
 // All automatic, page-load-based triggers have been removed to prevent race conditions.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'analyzeLinks' && sender.tab && sender.tab.id) {
@@ -153,7 +187,6 @@ async function analyzeLinks(links, tab, redFlags) {
   try {
     const analyzedLinks = [];
 
-    // First, analyze the URL of the tab itself.
     if (tab.url) {
       const selfScanResult = await analyzeSingleLink({ url: tab.url, text: 'Current Page URL', elementType: 'page' });
       analyzedLinks.push(selfScanResult);
@@ -172,7 +205,6 @@ async function analyzeLinks(links, tab, redFlags) {
 
     console.log(`[Tab ${tabId}] Analysis complete. Storing ${analyzedLinks.length} results.`);
 
-    // Store results and set state to 'complete' atomically
     await chrome.storage.local.set({
       ['scanResults_' + tabId]: analyzedLinks,
       ['redFlags_' + tabId]: redFlags || [],
@@ -188,7 +220,6 @@ async function analyzeLinks(links, tab, redFlags) {
   }
 }
 
-// Refactored function to analyze a single link object
 async function analyzeSingleLink(link) {
   let status = 'safe';
   let reason = '';
@@ -227,7 +258,7 @@ async function analyzeSingleLink(link) {
       }
     }
 
-    // 3. Heuristics (Now context-aware using trusted domains)
+    // 3. Heuristics (using trusted domains)
     if (status === 'safe') {
       // High-confidence danger signal: '@' in hostname is a classic phishing trick
       if (hostname.includes('@')) {

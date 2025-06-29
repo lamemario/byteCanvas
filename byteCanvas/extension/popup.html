@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>NUS Secure Access Tracker</title>
+  <title>NUS Secure Access</title>
   <link rel="stylesheet" href="popup.css">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 </head>
@@ -9,28 +9,23 @@
   <div class="container">
     <div class="header">
       <img src="icons/icon48.png" alt="ByteCanvas Logo">
-      <h1>NUS Secure Access Tracker</h1>
+      <h1>NUS Secure Access</h1>
     </div>
 
-    <div class="scan-section">
-      <button id="scanButton" class="scan-button">
-        <span class="material-icons">security</span>
-        Scan This Page
-      </button>
-      <div id="scanStatus" class="scan-status"></div>
+    <div class="status-container">
+      <div id="status" class="status">Scanning...</div>
+      <button id="scanButton" class="scan-button">Scan Now</button>
     </div>
 
-    <div class="results-section">
-      <h2 style="display: flex; align-items: center; gap: 8px;">
-        <span class="material-icons">link</span>
-        Scan Results
-      </h2>
-      <span id="linkCount" class="link-count">0 links</span>
+    <div class="results-container">
+      <div class="tabs">
+        <button class="tab-button active" data-tab="all">All</button>
+        <button class="tab-button" data-tab="safe">Safe</button>
+        <button class="tab-button" data-tab="warning">Warnings</button>
+        <button class="tab-button" data-tab="danger">Danger</button>
+      </div>
       <div id="results" class="results">
-        <div class="empty-state">
-          <span class="material-icons">search</span>
-          <p>No scan performed yet</p>
-        </div>
+        <div class="scan-message">Click "Scan Now" to check the page</div>
       </div>
     </div>
 

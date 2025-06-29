@@ -257,4 +257,4 @@ function isSuspiciousUrl(url) {
 function highlightSuspiciousLink(link) {
   link.style.border = '2px solid red'
   link.style.padding = '2px'
-} 
+}
