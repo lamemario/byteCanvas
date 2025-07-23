@@ -8,19 +8,18 @@
 <body>
   <div class="container">
     <div class="header">
-      <img src="icons/icon48.png" alt="ByteCanvas Logo">
+      <span class="material-icons" style="font-size:2.2em; background:linear-gradient(90deg,#003D7B 60%,#1de9b6 100%); color:#fff; border-radius:12px; padding:6px 8px 6px 8px; box-shadow:0 2px 8px rgba(0,0,0,0.08);">shield_person</span>
       <h1>NUS Secure Access</h1>
     </div>
 
     <div class="status-container">
       <div id="status" class="status">Scanning...</div>
-      <button id="scanButton" class="scan-button">Scan Now</button>
+      <button id="scanButton" class="scan-button">Scan This Page</button>
     </div>
 
     <div class="results-container">
       <div class="tabs">
-        <button class="tab-button active" data-tab="all">All</button>
-        <button class="tab-button" data-tab="safe">Safe</button>
+        <button class="tab-button active" data-tab="safe">Safe</button>
         <button class="tab-button" data-tab="warning">Warnings</button>
         <button class="tab-button" data-tab="danger">Danger</button>
       </div>
@@ -34,7 +33,7 @@
         <span class="material-icons">report</span>
         Report Suspicious Link
       </h2>
-      <form class="report-form" onsubmit="return false;">
+      <form class="report-form">
         <input type="text" id="reportLink" class="report-input" placeholder="Enter suspicious URL">
         <button id="reportButton" class="report-button" type="button">
           <span class="material-icons">send</span>
@@ -50,8 +49,9 @@
       <div id="tips" class="tips"></div>
     </div>
 
-    <footer>
-      <p>Protecting NUS students from phishing attacks</p>
+    <footer style="margin-top:32px; text-align:center; color:#888; font-size:0.98em; letter-spacing:0.01em;">
+      <hr style="border:none; border-top:1px solid #e3eafc; margin-bottom:12px;">
+      Protecting NUS students from phishing attacks
     </footer>
   </div>
   <script src="popup.js"></script>

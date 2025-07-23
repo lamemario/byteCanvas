@@ -18,8 +18,11 @@ if (window.self === window.top) {
   console.log('NUS Secure Access Tracker: Running in top-level frame. Initializing scanner.')
   chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === "scanLinks") {
+      console.log('content.js: Received scanLinks message');
       scanAllLinksAndSend()
       sendResponse({status: 'Scan initiated'})
+    } else if (request.action === "ping") {
+      sendResponse({status: 'pong'});
     }
     return true
   })
@@ -235,7 +238,7 @@ function gatherPhishingRedFlags() {
   return redFlags
 }
 function scanAllLinksAndSend() {
-  console.log('NUS Secure Access Tracker: scanAllLinksAndSend() triggered.')
+  console.log('content.js: scanAllLinksAndSend() triggered.');
   const links = scanAllLinks()
   const redFlags = gatherPhishingRedFlags()
   console.log(`NUS Secure Access Tracker: Found ${links.length} links and ${redFlags.length} red flags.`)

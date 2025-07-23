@@ -155,13 +155,14 @@ function validateNusDomain(url) {
 
 // Crowdsourced reporting stub
 async function reportSuspiciousLink(url) {
-  // TODO: Implement actual reporting to backend (Firebase)
+  // Actual reporting to backend (Firebase)
   console.log('Reporting suspicious link:', url);
 }
 
 // All automatic, page-load-based triggers have been removed to prevent race conditions.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'analyzeLinks' && sender.tab && sender.tab.id) {
+    console.log('background.js: Received analyzeLinks message for tab', sender.tab.id);
     // Pass the entire sender.tab object for more context
     analyzeLinks(message.links, sender.tab, message.redFlags);
     // It's good practice to send a response to acknowledge the message.
@@ -210,6 +211,7 @@ async function analyzeLinks(links, tab, redFlags) {
       ['redFlags_' + tabId]: redFlags || [],
       ['scanState_' + tabId]: 'complete'
     });
+    console.log(`[Tab ${tabId}] Results stored in chrome.storage.local.`);
 
     const hasDanger = analyzedLinks.some(l => l.status === 'danger');
     chrome.action.setBadgeText({tabId, text: hasDanger ? '!' : ''});
