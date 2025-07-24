@@ -183,20 +183,30 @@ document.addEventListener('DOMContentLoaded', function() {
       return true;
     });
 
-    results.innerHTML = filteredResults.map(element => `
+    results.innerHTML = filteredResults.map(element => {
+      let statusLabel = '';
+      if (element.status === 'danger') {
+        statusLabel = '⚠ Danger';
+      } else if (element.status === 'warning') {
+        statusLabel = '⚠ Warning';
+      } else {
+        statusLabel = '✓ Safe';
+      }
+      return `
       <div class="element-card ${element.status}">
         <div class="element-type">${element.elementType}</div>
         <div class="element-text">${element.text || 'No text'}</div>
         ${element.url ? `<div class="element-url">${element.url}</div>` : ''}
         <div class="element-status ${element.status}">
-          ${element.status === 'safe' ? '✓ Safe' : 
-            element.status === 'warning' ? '⚠ Warning' : 
-            element.status === 'danger' ? '⚠ Danger' : 'Unknown'}
+          ${statusLabel}
           ${element.reason ? ` - ${element.reason}` : ''}
         </div>
         ${element.path ? `<div class="element-path">${element.path}</div>` : ''}
       </div>
-    `).join('');
+      `;
+    }).join('');
+    // Show the number of items scanned
+    if (linkCount) linkCount.textContent = `${filteredResults.length} items scanned`;
   }
 
   // Set up tab switching
