@@ -1,7 +1,1 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- Shield background -->
-  <path d="M64 8L16 32v32c0 35.2 20.8 68.8 48 80 27.2-11.2 48-44.8 48-80V32L64 8z" fill="#1a73e8"/>
-  <!-- Checkmark -->
-  <path d="M48 64l16 16 32-32" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-</svg> 
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>

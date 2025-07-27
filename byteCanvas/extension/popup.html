@@ -13,7 +13,7 @@
     </div>
 
     <div class="status-container">
-      <div id="status" class="status">Scanning...</div>
+      <div id="status" class="status">Ready to scan.</div>
       <button id="scanButton" class="scan-button">Scan This Page</button>
     </div>
 
@@ -22,6 +22,15 @@
         <button class="tab-button active" data-tab="safe">Safe</button>
         <button class="tab-button" data-tab="warning">Warnings</button>
         <button class="tab-button" data-tab="danger">Danger</button>
+      </div>
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <span class="material-icons search-icon">search</span>
+          <input type="text" id="searchInput" class="search-input" placeholder="Search links by text...">
+          <button id="clearSearch" class="clear-search" style="display: none;">
+            <span class="material-icons">close</span>
+          </button>
+        </div>
       </div>
       <div id="results" class="results">
         <div class="scan-message">Click "Scan Now" to check the page</div>
@@ -49,7 +58,7 @@
       <div id="tips" class="tips"></div>
     </div>
 
-    <footer style="margin-top:32px; text-align:center; color:#888; font-size:0.98em; letter-spacing:0.01em;">
+    <footer style="margin-top:32px; text-align:center; color:#fff; font-size:0.98em; letter-spacing:0.01em;">
       <hr style="border:none; border-top:1px solid #e3eafc; margin-bottom:12px;">
       Protecting NUS students from phishing attacks
     </footer>

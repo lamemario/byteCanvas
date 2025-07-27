@@ -2,7 +2,6 @@ function getCurrentTabId(callback) {
   chrome.tabs.query({ active: true, currentWindow: true }, function(tabs) {
     if (!tabs || tabs.length === 0) {
       // handle error
-      if (typeof scanStatus !== 'undefined' && scanStatus) scanStatus.textContent = 'Error: No active tab found.';
       callback(null);
       return;
     }
@@ -17,7 +16,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const scanButton = document.getElementById('scanButton');
   const reportButton = document.getElementById('reportButton');
   const reportLink = document.getElementById('reportLink');
-  const scanStatus = document.getElementById('scanStatus');
   const results = document.getElementById('results');
   const tips = document.getElementById('tips');
   const linkCount = document.getElementById('linkCount');
@@ -63,7 +61,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       }
 
-      displayRedFlags(redFlags);
       displayResults();
       if (linkCount) {
         linkCount.textContent = `${links.length} links`;
@@ -73,19 +70,15 @@ document.addEventListener('DOMContentLoaded', function() {
       if (scanState === 'scanning') {
         scanButton.disabled = true;
         scanButton.innerHTML = '<span class="material-icons rotating">sync</span> Scanning...';
-        if (scanStatus) {
-          scanStatus.textContent = 'Scan in progress...';
-          scanStatus.style.backgroundColor = 'var(--surface-color)';
-          scanStatus.style.color = 'var(--text-color)';
+        if (statusElement) {
+          statusElement.textContent = 'Scan in progress...';
         }
         results.innerHTML = `<div class="empty-state"><div class="spinner"></div><p>Analyzing links...</p></div>`;
       } else if (scanState === 'complete') {
         scanButton.disabled = false;
         scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
-        if (scanStatus) {
-          scanStatus.textContent = 'Scan complete!';
-          scanStatus.style.backgroundColor = 'var(--success-color)';
-          scanStatus.style.color = 'white';
+        if (statusElement) {
+          statusElement.textContent = `Found ${links.length} links`;
         }
         if (links.length === 0) {
             results.innerHTML = `<div class="empty-state"><span class="material-icons">search</span><p>No scannable links found on this page.</p></div>`;
@@ -94,10 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Default state if no scan has happened
         scanButton.disabled = false;
         scanButton.innerHTML = '<span class="material-icons">security</span> Scan This Page';
-        if (scanStatus) {
-          scanStatus.textContent = 'Ready to scan.';
-          scanStatus.style.backgroundColor = 'var(--surface-color)';
-          scanStatus.style.color = 'var(--text-color)';
+        if (statusElement) {
+          statusElement.textContent = 'Ready to scan.';
         }
         results.innerHTML = `<div class="empty-state"><span class="material-icons">shield</span><p>Click "Scan This Page" to check for threats.</p></div>`;
       }
@@ -118,9 +109,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
   function setScanUnavailableUI() {
     setScanButtonAvailability(false);
-    if (scanStatus) scanStatus.textContent = 'Scanning not available on this page.';
+    if (statusElement) statusElement.textContent = 'Scanning not available on this page.';
     if (results) results.innerHTML = '<div class="empty-state"><span class="material-icons">block</span><p>Scanning not available on this page.</p></div>';
-    if (statusElement) statusElement.textContent = '';
   }
 
   // Initial setup: Get current tab and set up listeners
@@ -133,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
       if (response && response.status === 'pong') {
         scanAvailable = true;
         setScanButtonAvailability(true);
-        if (scanStatus) scanStatus.textContent = 'Ready to scan.';
+        if (statusElement) statusElement.textContent = 'Ready to scan.';
         refreshUi();
       } else {
         scanAvailable = false;
@@ -156,6 +146,63 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Load tips
   loadTips();
+
+  // Search functionality
+  const searchInput = document.getElementById('searchInput');
+  const clearSearch = document.getElementById('clearSearch');
+  let searchTerm = '';
+
+  searchInput.addEventListener('input', function() {
+    searchTerm = this.value.toLowerCase().trim();
+    clearSearch.style.display = searchTerm ? 'flex' : 'none';
+    filterResults();
+  });
+
+  clearSearch.addEventListener('click', function() {
+    searchInput.value = '';
+    searchTerm = '';
+    clearSearch.style.display = 'none';
+    filterResults();
+    searchInput.focus();
+  });
+
+  function filterResults() {
+    const resultCards = document.querySelectorAll('.element-card');
+    let visibleCount = 0;
+
+    resultCards.forEach(card => {
+      const linkText = card.querySelector('.element-text')?.textContent?.toLowerCase() || '';
+      const linkUrl = card.querySelector('.element-url-link')?.textContent?.toLowerCase() || '';
+      const linkPath = card.querySelector('.element-path')?.textContent?.toLowerCase() || '';
+      
+      const matchesSearch = !searchTerm || 
+        linkText.includes(searchTerm) || 
+        linkUrl.includes(searchTerm) || 
+        linkPath.includes(searchTerm);
+
+      if (matchesSearch) {
+        card.style.display = 'block';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    // Update results message if no matches
+    const resultsContainer = document.getElementById('results');
+    const noResultsMessage = resultsContainer.querySelector('.no-results-message');
+    
+    if (searchTerm && visibleCount === 0) {
+      if (!noResultsMessage) {
+        const message = document.createElement('div');
+        message.className = 'no-results-message';
+        message.innerHTML = `<div class="empty-state"><span class="material-icons">search_off</span><p>No links found matching "${searchTerm}"</p></div>`;
+        resultsContainer.appendChild(message);
+      }
+    } else if (noResultsMessage) {
+      noResultsMessage.remove();
+    }
+  }
 
   // Scan button click handler (manual scan)
   scanButton.addEventListener('click', function() {
@@ -213,7 +260,7 @@ document.addEventListener('DOMContentLoaded', function() {
       reportButton.innerHTML = '<span class="material-icons rotating">sync</span>';
       reportButton.disabled = true;
 
-      fetch('http://127.0.0.1:5000/report', {
+              fetch('http://127.0.0.1:5001/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url, meta: { reported_by: 'extension' } })
@@ -223,11 +270,29 @@ document.addEventListener('DOMContentLoaded', function() {
         reportLink.value = '';
         reportButton.innerHTML = '<span class="material-icons">send</span>';
         reportButton.disabled = false;
+        
+        // Fade out the report form slightly when showing thank you
+        const reportForm = document.querySelector('.report-form');
+        reportForm.classList.add('fade-out');
+        
         const status = document.createElement('div');
         status.className = 'status success';
         status.textContent = data.success ? 'Thank you for your report!' : 'Error: ' + data.error;
-        document.querySelector('.report-form').appendChild(status);
-        setTimeout(() => status.remove(), 3000);
+        reportForm.appendChild(status);
+        
+        // Smooth fade out after 2.5 seconds
+        setTimeout(() => {
+          status.classList.add('fade-out');
+          setTimeout(() => {
+            status.remove();
+            // Smoothly transition the report form back using CSS custom properties
+            reportForm.classList.add('returning');
+            setTimeout(() => {
+              // Clean up classes after transition completes
+              reportForm.classList.remove('fade-out', 'returning');
+            }, 1500);
+          }, 500);
+        }, 2500);
       })
       .catch(error => {
         reportButton.innerHTML = '<span class="material-icons">send</span>';
@@ -283,16 +348,11 @@ document.addEventListener('DOMContentLoaded', function() {
           if (linkCount) {
             linkCount.textContent = `${elements.length} elements`;
           }
-          if (scanStatus) {
-            scanStatus.textContent = 'Scan complete!';
-            scanStatus.style.backgroundColor = 'var(--success-color)';
-            scanStatus.style.color = 'white';
-          }
+                  if (statusElement) {
+          statusElement.textContent = `Found ${elements.length} elements`;
         }
-        if (changes['redFlags_' + tabId]) {
-          const redFlags = changes['redFlags_' + tabId].newValue || [];
-          displayRedFlags(redFlags);
         }
+
       }
     });
   });

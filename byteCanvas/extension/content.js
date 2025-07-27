@@ -136,10 +136,6 @@ function scanLinksInNode(node, links) {
   }
 }
 const ENABLE_SAFE_BROWSING = true
-const ENABLE_NUS_LISTS = true
-const NUS_WHITELIST = []
-const NUS_BLACKLIST = []
-const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98'
 function getLinkStatus(url) {
   try {
     const urlObj = new URL(url)

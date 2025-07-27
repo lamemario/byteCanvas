@@ -15,7 +15,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(details => {
   const tabId = details.tabId;
   const urlStr = details.url;
 
-  // Clear any previous flag for this tab to avoid stale warnings
+  // Clear any previous flag for this tab to avoid old scan results which is essential for this real-time application
   chrome.storage.local.remove('deceptiveUrl_' + tabId);
 
   try {
@@ -33,27 +33,12 @@ chrome.webNavigation.onBeforeNavigate.addListener(details => {
       chrome.storage.local.set({['deceptiveUrl_' + tabId]: deceptiveInfo});
     }
   } catch (e) {
-    // URL parsing can fail on unusual strings, just ignore it.
+    // URL parsing can fail on unusual strings too
   }
 });
 
 // --- Configurable security checks ---
 const ENABLE_SAFE_BROWSING = true; // Set to false to disable
-const ENABLE_NUS_LISTS = false; // Set to false to disable since actual true lists are not available
-// TODO: Fill these with lists from NUS IT Security
-
-// NUS-specific domains that are always safe
-const NUS_WHITELIST = [
-  'nus.edu.sg',
-  'nusmods.com',
-  'ivle.nus.edu.sg',
-  'webmail.nus.edu.sg',
-  'outlook.office.com',
-  'office365.com',
-  'instructure.com',
-  'canvas.nus.edu.sg',
-  'luminus.nus.edu.sg'
-];
 
 // Based on research of official and affiliated NUS domains.
 const TRUSTED_DOMAINS = [
@@ -72,35 +57,9 @@ const TRUSTED_DOMAINS = [
 ];
 
 // Google Safe Browsing API key
-const SAFE_BROWSING_API_KEY = 'AIzaSyDbgdnawHqo9NLoYb3Om5ArfhAltoQDu98';
-
-// In-memory cache for Safe Browsing results
-const safeBrowsingCache = {};
-let rateLimitHit = false; // Global flag for rate limiting
-
-// Sleep utility for throttling
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Persistent cache using chrome.storage.local
-async function getPersistentCache(url) {
-  return new Promise(resolve => {
-    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
-      const cache = result.safeBrowsingCache || {};
-      resolve(cache[url]);
-    });
-  });
-}
-async function setPersistentCache(url, value) {
-  return new Promise(resolve => {
-    chrome.storage.local.get(['safeBrowsingCache'], (result) => {
-      const cache = result.safeBrowsingCache || {};
-      cache[url] = value;
-      chrome.storage.local.set({safeBrowsingCache: cache}, resolve);
-    });
-  });
-}
+// TODO: Replace with actual API key before deployment
+// Get from: https://console.cloud.google.com/apis/credentials
+const SAFE_BROWSING_API_KEY = 'YOUR_GOOGLE_SAFE_BROWSING_API_KEY_HERE';
 
 // Google Safe Browsing API real implementation
 async function checkUrlWithSafeBrowsing(url) {
@@ -115,6 +74,7 @@ async function checkUrlWithSafeBrowsing(url) {
       clientId: "nus-secure-access-tracker",
       clientVersion: "1.0.0"
     },
+    // These are the threat types that Google Safe Browsing API can detect according to their documentation
     threatInfo: {
       threatTypes: ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
       platformTypes: ["ANY_PLATFORM"],
@@ -147,25 +107,12 @@ async function checkUrlWithSafeBrowsing(url) {
   }
 }
 
-// NUS-specific domain validation stub
-function validateNusDomain(url) {
-  // TODO: Implement actual logic using NUS_WHITELIST and NUS_BLACKLIST
-  return { isNusDomain: false, isSuspicious: false };
-}
-
-// Crowdsourced reporting stub
-async function reportSuspiciousLink(url) {
-  // Actual reporting to backend (Firebase)
-  console.log('Reporting suspicious link:', url);
-}
-
 // All automatic, page-load-based triggers have been removed to prevent race conditions.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'analyzeLinks' && sender.tab && sender.tab.id) {
     console.log('background.js: Received analyzeLinks message for tab', sender.tab.id);
     // Pass the entire sender.tab object for more context
     analyzeLinks(message.links, sender.tab, message.redFlags);
-    // It's good practice to send a response to acknowledge the message.
     sendResponse({status: 'Analysis started'});
   }
   return true; // Keep channel open for async response in case we need it later.
@@ -238,19 +185,7 @@ async function analyzeSingleLink(link) {
     const urlObj = new URL(link.url);
     const hostname = urlObj.hostname;
 
-    // 1. NUS whitelist/blacklist
-    if (ENABLE_NUS_LISTS) {
-      if (NUS_WHITELIST.some(domain => hostname.endsWith(domain))) {
-        status = 'safe';
-        reason = 'NUS Whitelist';
-      }
-      if (NUS_BLACKLIST.some(domain => hostname.endsWith(domain))) {
-        status = 'danger';
-        reason = 'NUS Blacklist';
-      }
-    }
-
-    // 2. Google Safe Browsing API
+    // 1. Google Safe Browsing API
     if (status === 'safe' && ENABLE_SAFE_BROWSING) {
       const safeBrowsingResult = await checkUrlWithSafeBrowsing(link.url);
       console.log('Safe Browsing API result for', link.url, safeBrowsingResult);
@@ -260,7 +195,7 @@ async function analyzeSingleLink(link) {
       }
     }
 
-    // 3. Heuristics (using trusted domains)
+    // 2. Heuristics (using trusted domains)
     if (status === 'safe') {
       // High-confidence danger signal: '@' in hostname is a classic phishing trick
       if (hostname.includes('@')) {
