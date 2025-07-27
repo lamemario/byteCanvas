@@ -173,6 +173,95 @@ byteCanvas/
 - **Real-time threat database** updates
 - **Advanced analytics** dashboard for security insights
 
+## 🔐 Security Setup
+
+**Before deploying, you MUST secure your credentials:**
+
+#### 1. **Google Safe Browsing API Key Setup**
+
+**Step-by-step guide:**
+
+1. **Go to Google Cloud Console**:
+   - Visit [https://console.cloud.google.com/]
+   - Sign in with your Google account
+
+2. **Create a new project** (or select existing):
+   - Click on the project dropdown at the top
+   - Click "New Project"
+   - Name it something like "NUS-Safe-Browsing"
+   - Click "Create"
+
+3. **Enable Safe Browsing API**:
+   - Go to [APIs & Services > Library](https://console.cloud.google.com/apis/library)
+   - Search for "Safe Browsing API"
+   - Click on "Safe Browsing API"
+   - Click "Enable"
+
+4. **Create API Key**:
+   - Go to [APIs & Services > Credentials](https://console.cloud.google.com/apis/credentials)
+   - Click "Create Credentials" > "API Key"
+   - Copy the generated API key
+
+5. **Restrict the API Key** (Recommended):
+   - Click on the API key you just created
+   - Under "Application restrictions", select "HTTP referrers"
+   - Add your domain or leave unrestricted for testing
+   - Under "API restrictions", select "Restrict key"
+   - Select "Safe Browsing API" from the dropdown
+   - Click "Save"
+
+6. **Update the extension**:
+   - Open `extension/background.js`
+   - Replace `YOUR_GOOGLE_SAFE_BROWSING_API_KEY_HERE` with your actual API key
+
+#### 2. **Firebase Project Setup**
+
+**Step-by-step guide:**
+
+1. **Create Firebase Project**:
+   - Go to [Firebase Console](https://console.firebase.google.com/)
+   - Click "Create a project"
+   - Name it something like "nus-safe-access"
+   - Enable Google Analytics (optional)
+   - Click "Create project"
+
+2. **Set up Firestore Database**:
+   - In your Firebase project, click "Firestore Database" in the left sidebar
+   - Click "Create database"
+   - Choose "Start in test mode" (for development)
+   - Select a location (choose closest to you)
+   - Click "Done"
+
+3. **Create Service Account**:
+   - Go to Project Settings (gear icon)
+   - Click "Service accounts" tab
+   - Click "Generate new private key"
+   - Choose "Firebase Admin SDK"
+   - Click "Generate key"
+   - Download the JSON file
+
+4. **Set up credentials**:
+   - **Option A (Recommended)**: Set environment variable:
+     ```bash
+     export FIREBASE_CREDENTIALS='{"type":"service_account",...}'
+     ```
+   - **Option B (Development)**: Save the JSON file as `firebase-service-account.json` in the `backend/` directory
+
+#### 3. **Environment Variables**
+Create a `.env` file in the `backend/` directory:
+```bash
+# Copy from env.example
+cp backend/env.example backend/.env
+# Edit with your actual credentials
+nano backend/.env
+```
+
+**Example .env file:**
+```bash
+# Firebase Service Account Credentials (JSON string)
+FIREBASE_CREDENTIALS='{"type": "service_account", "project_id": "your-project-id", ...}'
+```
+
 ## 👥 Team
 
 - **Matthias** (Computer Engineering) - Backend & Database
