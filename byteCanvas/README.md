@@ -113,9 +113,11 @@ NUS Secure Access Tracker is a security extension designed specifically for NUS 
    ```
 
 4. **Configure Firebase**:
-   - Create a Firebase project
-   - Download service account key as `firebase-service-account.json`
-   - Place it in the `backend/` directory
+   - Create a Firebase project at [Firebase Console](https://console.firebase.google.com/)
+   - Navigate to Project Settings > Service Accounts
+   - Click "Generate New Private Key"
+   - Save the JSON file as `firebase-service-account.json` in the `backend/` directory
+   - **Alternative**: Set environment variable `FIREBASE_CREDENTIALS` with the JSON content
 
 5. **Run the backend**:
    ```bash
@@ -142,7 +144,7 @@ byteCanvas/
 ├── backend/                 # Flask backend
 │   ├── app.py               # Main Flask application
 │   ├── requirements.txt     # Python dependencies
-│   └── firebase-service-account.json # Not going to share this one, it's sensitive!
+│   └── env.example         # Environment variables template
 └── README.md                # This file
 ```
 
@@ -164,68 +166,6 @@ byteCanvas/
    - `POST /report` - Submit suspicious link
    - `POST /test-firebase` - Test Firebase connection
 3. **Verify Firebase integration** by checking the database
-
-## �� Configuration
-
-### 🔐 Security Setup (IMPORTANT!)
-
-**Before deploying, you MUST secure your credentials:**
-
-#### 1. **Google Safe Browsing API Key**
-1. Go to [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Create a new API key or use existing one
-3. Replace `YOUR_GOOGLE_SAFE_BROWSING_API_KEY_HERE` in `extension/background.js` with your actual key
-
-#### 2. **Firebase Service Account**
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Navigate to Project Settings > Service Accounts
-3. Click "Generate New Private Key"
-4. **Option A (Recommended)**: Set environment variable:
-   ```bash
-   export FIREBASE_CREDENTIALS='{"type":"service_account",...}'
-   ```
-   **Option B (Development)**: Place the JSON file in `backend/` as `firebase-service-account.json`
-
-#### 3. **Environment Variables**
-Create a `.env` file in the `backend/` directory:
-```bash
-# Copy from env.example
-cp backend/env.example backend/.env
-# Edit with your actual credentials
-nano backend/.env
-```
-
-### Extension Permissions
-The extension requires the following permissions:
-- `activeTab` - Access to current tab content
-- `storage` - Local data storage
-- `scripting` - Content script injection
-- `webNavigation` - Navigation event monitoring
-- `webRequest` - Network request monitoring
-
-### Host Permissions
-- `*://*.nus.edu.sg/*` - NUS domains
-- `*://*.nusmods.com/*` - NUSMods
-- `*://*.ivle.nus.edu.sg/*` - IVLE
-- `*://*.webmail.nus.edu.sg/*` - NUS Webmail
-- `*://*.outlook.office.com/*` - Office 365
-- `*://*.instructure.com/*` - Canvas
-- `*://*.luminus.nus.edu.sg/*` - Luminus
-- `*://testsafebrowsing.appspot.com/s/phishing.html` - Added into Host Permissions to show you Google Safe Browsing API's danger detection that's part of our background detection which isn't very obvious to users!
-
-## 🎯 Use Cases
-
-### For Students
-- **Safe browsing** on NUS-related websites
-- **Phishing awareness** through educational content
-- **Quick reporting** of suspicious links
-- **Real-time protection** while studying
-
-### For Administrators
-- **Threat intelligence** through user reports
-- **Database of known threats** for analysis
-- **Scalable architecture** for campus-wide deployment
-- **Integration capabilities** with existing security systems
 
 ## 🔮 Future Enhancements
 
