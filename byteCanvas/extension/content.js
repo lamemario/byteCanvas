@@ -58,48 +58,45 @@ if (window.self === window.top) {
   console.log('NUS Secure Access Tracker: Running in an iframe. Scanner will not initialize.')
 }
 function scanAllLinks() {
-  const links = []
-  const pageLinks = document.getElementsByTagName('a')
-  for (let link of pageLinks) {
-    let href = link.getAttribute('href')
-    let linkText = link.textContent.trim() || ''
-    if (isValidLinkUrl(href)) {
-      links.push({
-        url: link.href,
-        text: linkText,
-        status: getLinkStatus(link.href),
-        elementType: 'link'
-      })
-    } else {
-      links.push({
-        url: href || '',
-        text: linkText,
-        status: 'invalid',
-        reason: 'No valid destination URL',
-        elementType: 'link'
-      })
+  const links = [];
+  const selectors = [
+    'a[href]',
+    'button',
+    'input[type="button"]',
+    'input[type="submit"]',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="menuitem"]',
+    '[onclick]',
+    '[tabindex="0"]'
+  ];
+
+  const clickableElements = document.querySelectorAll(selectors.join(', '));
+
+  for (const el of clickableElements) {
+    let url = el.getAttribute('href') || el.getAttribute('data-url') || el.getAttribute('formaction') || '';
+    if (el.tagName === 'INPUT' && el.form && el.form.action && !url) {
+        url = el.form.action;
     }
+    // For elements with onclick but no obvious URL, we can't determine a destination
+    // but we can still flag them based on text content.
+    
+    let text = el.textContent.trim() || el.value || el.alt || el.ariaLabel || '';
+    const triggers = findEmotionalTriggers(text);
+
+    links.push({
+      url: url ? new URL(url, document.baseURI).href : '', // Resolve relative URLs
+      text: text,
+      status: url ? getLinkStatus(url) : 'neutral',
+      reason: url ? '' : 'No direct URL, check for risky text.',
+      elementType: el.tagName.toLowerCase(),
+      triggers: triggers
+    });
   }
-  const buttons = document.getElementsByTagName('button')
-  for (let btn of buttons) {
-    let btnText = btn.textContent.trim() || ''
-    let btnUrl = btn.getAttribute('data-url') || btn.getAttribute('formaction') || ''
-    if (!btnUrl && btn.type === 'submit' && btn.form && btn.form.action) {
-      btnUrl = btn.form.action
-    }
-    const triggers = findEmotionalTriggers(btnText)
-    if ((btnUrl && isValidLinkUrl(btnUrl)) || triggers.length > 0) {
-      links.push({
-        url: btnUrl,
-        text: btnText,
-        status: btnUrl && isValidLinkUrl(btnUrl) ? getLinkStatus(btnUrl) : 'invalid',
-        reason: btnUrl ? '' : 'No valid destination URL',
-        elementType: 'button',
-        triggers: triggers
-      })
-    }
-  }
-  return links
+
+  // Deduplicate based on URL and text to avoid clutter
+  const uniqueLinks = Array.from(new Map(links.map(link => [`${link.url}:${link.text}`, link])).values());
+  return uniqueLinks;
 }
 function scanLinksInNode(node, links) {
   const anchorTags = node.querySelectorAll ? node.querySelectorAll('a') : []
