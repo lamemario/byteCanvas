@@ -267,6 +267,3 @@ FIREBASE_CREDENTIALS='{"type": "service_account", "project_id": "your-project-id
 - **Matthias** (Computer Engineering) - Backend & Database
 - **Sayyid** (Information Security) - Frontend & Security Logic
 
----
-
-**Note**: This extension is designed specifically for NUS students and staff. That said, always follow NUS IT security policies and report security incidents through official channels!
